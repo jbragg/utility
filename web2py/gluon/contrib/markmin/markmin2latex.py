@@ -16,15 +16,13 @@ regex_code = re.compile('('+META+')|(``(?P<t>.*?)``(:(?P<c>\w+))?)',re.S)
 regex_title = re.compile('^#{1} (?P<t>[^\n]+)',re.M)
 regex_maps = [
     (re.compile('[ \t\r]+\n'),'\n'),
-    (re.compile('[ \t\r]+\n'),'\n'),
     (re.compile('\*\*(?P<t>[^\s\*]+( +[^\s\*]+)*)\*\*'),'{\\\\bf \g<t>}'),
     (re.compile("''(?P<t>[^\s']+( +[^\s']+)*)''"),'{\\it \g<t>}'),
-    (re.compile('^#{6} (?P<t>[^\n]+)',re.M),'\n\n{\\\\bf \g<t>}\n'),
-    (re.compile('^#{5} (?P<t>[^\n]+)',re.M),'\n\n{\\\\bf \g<t>}\n'),
-    (re.compile('^#{4} (?P<t>[^\n]+)',re.M),'\n\n\\\\goodbreak\\subsubsection{\g<t>}\n'),
-    (re.compile('^#{3} (?P<t>[^\n]+)',re.M),'\n\n\\\\goodbreak\\subsection{\g<t>}\n'),
-    (re.compile('^#{2} (?P<t>[^\n]+)',re.M),'\n\n\\\\goodbreak\\section{\g<t>}\n'),
-    (re.compile('^#{1} (?P<t>[^\n]+)',re.M),''),
+    (re.compile('^#{5,6}\s*(?P<t>[^\n]+)',re.M),'\n\n{\\\\bf \g<t>}\n'),
+    (re.compile('^#{4}\s*(?P<t>[^\n]+)',re.M),'\n\n\\\\goodbreak\\subsubsection{\g<t>}\n'),
+    (re.compile('^#{3}\s*(?P<t>[^\n]+)',re.M),'\n\n\\\\goodbreak\\subsection{\g<t>}\n'),
+    (re.compile('^#{2}\s*(?P<t>[^\n]+)',re.M),'\n\n\\\\goodbreak\\section{\g<t>}\n'),
+    (re.compile('^#{1}\s*(?P<t>[^\n]+)',re.M),''),
     (re.compile('^\- +(?P<t>.*)',re.M),'\\\\begin{itemize}\n\\item \g<t>\n\\end{itemize}'),
     (re.compile('^\+ +(?P<t>.*)',re.M),'\\\\begin{itemize}\n\\item \g<t>\n\\end{itemize}'),
     (re.compile('\\\\end\{itemize\}\s+\\\\begin\{itemize\}'),'\n'),
@@ -139,7 +137,7 @@ def render(text,
     text = regex_noindent.sub('\n\\\\noindent \g<t>',text)
 
     ### fix paths in images
-    regex=re.compile('\\\\_[\w_]*\.(eps|png|jpg|gif)')
+    regex=re.compile('\\\\_\w*\.(eps|png|jpg|gif)')
     while True:
         match=regex.search(text)
         if not match: break

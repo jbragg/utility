@@ -23,6 +23,7 @@ base_modules = ['aifc', 'anydbm', 'array', 'asynchat', 'asyncore', 'atexit',
                 'collections', 'colorsys', 'compileall', 'compiler',
                 'compiler.ast', 'compiler.visitor', 'ConfigParser',
                 'contextlib', 'Cookie', 'cookielib', 'copy', 'copy_reg',
+                'collections',
                 'cPickle', 'cProfile', 'cStringIO', 'csv', 'ctypes',
                 'datetime', 'decimal', 'difflib', 'dircache', 'dis',
                 'doctest', 'DocXMLRPCServer', 'dumbdbm', 'dummy_thread',
@@ -67,13 +68,6 @@ base_modules = ['aifc', 'anydbm', 'array', 'asynchat', 'asyncore', 'atexit',
                 'MimeWriter', 'mimify', 'multifile', 'sets']
 
 contributed_modules = []
-for root, dirs, files in os.walk('gluon'):
-    for candidate in ['.'.join(
-      os.path.join(root, os.path.splitext(name)[0]).split(os.sep))
-      for name in files if name.endswith('.py')
-        and root.split(os.sep) != ['gluon', 'tests']
-      ]:
-        contributed_modules.append(candidate)
 
 # Python base version
 python_version = sys.version[:3]
@@ -86,7 +80,7 @@ alert_dependency = ['hashlib', 'uuid']
 #
 # List of modules deprecated in Python 2.6 or 2.7 that are in the above set
 py26_deprecated = ['mhlib', 'multifile', 'mimify', 'sets', 'MimeWriter']
-py27_deprecated = [] # ['optparse'] but we need it for now
+py27_deprecated = []  # ['optparse'] but we need it for now
 
 if python_version >= '2.6':
     base_modules += ['json', 'multiprocessing']
@@ -99,16 +93,11 @@ if python_version >= '2.7':
 # Now iterate in the base_modules, trying to do the import
 for module in base_modules + contributed_modules:
     try:
-         __import__(module, globals(), locals(), [])
+        __import__(module, globals(), locals(), [])
     except:
         # Raise an exception if the current module is a dependency
         if module in alert_dependency:
             msg = "Missing dependency: %(module)s\n" % locals()
             msg += "Try the following command: "
             msg += "easy_install-%(python_version)s -U %(module)s" % locals()
-            raise ImportError, msg
-
-
-
-
-
+            raise ImportError(msg)

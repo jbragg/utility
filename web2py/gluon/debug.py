@@ -2,20 +2,22 @@
 # -*- coding: utf-8 -*-
 
 """
-This file is part of the web2py Web Framework
-Developed by Massimo Di Pierro <mdipierro@cs.depaul.edu>,
-limodou <limodou@gmail.com> and srackham <srackham@gmail.com>.
-License: LGPLv3 (http://www.gnu.org/licenses/lgpl.html)
+| This file is part of the web2py Web Framework
+| Developed by Massimo Di Pierro <mdipierro@cs.depaul.edu>,
+| limodou <limodou@gmail.com> and srackham <srackham@gmail.com>.
+| License: LGPLv3 (http://www.gnu.org/licenses/lgpl.html)
 
+Debugger support classes
+------------------------
 """
 
 import logging
-import os
 import pdb
 import Queue
 import sys
 
 logger = logging.getLogger("web2py")
+
 
 class Pipe(Queue.Queue):
     def __init__(self, name, mode='r', *args, **kwargs):
@@ -23,7 +25,7 @@ class Pipe(Queue.Queue):
         Queue.Queue.__init__(self, *args, **kwargs)
 
     def write(self, data):
-        logger.debug("debug %s writting %s" % (self.__name, data))
+        logger.debug("debug %s writing %s" % (self.__name, data))
         self.put(data)
 
     def flush(self):
@@ -52,14 +54,15 @@ pipe_out = Pipe('out')
 
 debugger = pdb.Pdb(completekey=None, stdin=pipe_in, stdout=pipe_out,)
 
+
 def set_trace():
-    "breakpoint shortcut (like pdb)"
+    """breakpoint shortcut (like pdb)"""
     logger.info("DEBUG: set_trace!")
     debugger.set_trace(sys._getframe().f_back)
 
 
 def stop_trace():
-    "stop waiting for the debugger (called atexit)"
+    """stop waiting for the debugger (called atexit)"""
     # this should prevent communicate is wait forever a command result
     # and the main thread has finished
     logger.info("DEBUG: stop_trace!")
@@ -67,8 +70,9 @@ def stop_trace():
     pipe_out.write(None)
     #pipe_out.flush()
 
+
 def communicate(command=None):
-    "send command to debbuger, wait result"
+    """send command to debbuger, wait result"""
     if command is not None:
         logger.info("DEBUG: sending command %s" % command)
         pipe_in.write(command)
@@ -91,8 +95,9 @@ from threading import RLock
 interact_lock = RLock()
 run_lock = RLock()
 
+
 def check_interaction(fn):
-    "Decorator to clean and prevent interaction when not available"
+    """Decorator to clean and prevent interaction when not available"""
     def check_fn(self, *args, **kwargs):
         interact_lock.acquire()
         try:
@@ -105,7 +110,7 @@ def check_interaction(fn):
 
 
 class WebDebugger(qdb.Frontend):
-    "Qdb web2py interface"
+    """Qdb web2py interface"""
 
     def __init__(self, pipe, completekey='tab', stdin=None, stdout=None):
         qdb.Frontend.__init__(self, pipe)
@@ -180,7 +185,7 @@ parent_queue, child_queue = Queue.Queue(), Queue.Queue()
 front_conn = qdb.QueuePipe("parent", parent_queue, child_queue)
 child_conn = qdb.QueuePipe("child", child_queue, parent_queue)
 
-web_debugger = WebDebugger(front_conn)                          # frontend
+web_debugger = WebDebugger(front_conn)                                     # frontend
 qdb_debugger = qdb.Qdb(pipe=child_conn, redirect_stdio=False, skip=None)   # backend
 dbg = qdb_debugger
 
@@ -189,5 +194,3 @@ qdb_debugger.set_params(dict(call_stack=True, environment=True))
 
 import gluon.main
 gluon.main.global_settings.debugging = True
-
-

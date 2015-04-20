@@ -1,9 +1,16 @@
 {{extend 'layout.html'}}
-
+{{
+dlg = dialog
+smt_button = dlg.element(_type="submit")
+smt_button['_class'] = 'btn'
+smt_button['_style'] = 'margin-right:4px;'
+ccl_button = dlg.element(_type="button")
+ccl_button['_class'] = 'btn'
+}}
 {{block sectionclass}}delete{{end}}
-
-<div class="center">
+<!-- begin "delete" block -->
 <h2>{{=T('Are you sure you want to delete file "%s"?', filename)}}</h2>
-<p>{{=FORM(INPUT(_type='submit',_name='nodelete',_value=T('Abort')),INPUT(_type='hidden',_name='sender',_value=sender), _class="inline")}}{{=FORM(INPUT(_type='submit',_name='delete',_value=T('Delete')),INPUT(_type='hidden',_name='sender',_value=sender), _class="inline")}}</p>
+<div class="center">
+{{=dialog}}
 </div>
-
+<!-- end "delete" block -->

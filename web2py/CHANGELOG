@@ -1,41 +1,398 @@
-## 2.00.0
+## 2.10.1-2.10.2
 
-- request.args(0,default=0, cast=int, url_onerror=URL(...)), thanks Anthony
-- generic.ics
-- generic.map
-- geodal and spatialite, thanks Denes and Fran
-- auth.enable_record_versioning(...db=...)
-- db.table._before_insert, _after_insert, _before_update, _after_update, _before_delete. _after_delete
+- welcome app defaults to Bootstrap 3
+- DAL -> pyDAL (thanks Giovanni, Niphlod, Paolo)
+  - new modular dal
+  - fixed problems with GAE support
+  - moved to full NDB support
+  - improved connection pooling logic
+- optional cache.ram.max_ram_utilization = 90 (experimental)
+- improved cache.disk logic (thanks Niphlod and Leonel)
+- lots of pep8 improvements, thanks Richard
+- added support for email attchments when auth.settings.server='gae'
+- fixed app.yaml.example for GAE
+- fixed many small issues
+- many many more tests (thanks Giovanni, Niphlod, Paolo)
+- upgrading static libraries (bootstrap, codemirror, jquery, etc)
+
+## 2.9.12
+
+- Tornado HTTPS support, thanks Diego
+- Modular DAL, thanks Giovanni
+- Added coverage support, thanks Niphlod
+- More tests, thanks Niphlod and Paolo Valleri
+- Added support for show_if in readonly sqlform, thanks Paolo
+- Improved scheduler, thanks Niphlod
+- Email timeout support
+- Made web2py's custom_import work with circular imports, thanks Jack Kuan
+- Added Portuguese, Catalan, and Burmese translations
+- Allow map_hyphen to work for application names, thanks Tim Nyborg
+- New module appconfig.py, thanks Niphlod
+- Added geospatial support to Teradata adaptor, thanks Andrew Willimott 
+- Many bug fixes
+
+
+
+## 2.9.6 - 2.9.10
+
+- fixed support of GAE + SQL
+- fixed a typo in the license of some login_methods code. It is now LGPL consistently with the rest of the web2py code. This change applied to all previous web2py versions.
+- support for SAML2 (with pysaml2)
+- Sphinx documentation (thanks Niphlod)
+- improved scheduler (thanks Niphlod)
+- increased security
+- better cache.disk (thanks Leonel)
+- sessions are stored in subfolders for speed
+- postgres support for "INSERT ... RETURING ..."
+- ldap support for Certificate Authority (thanks Maggs and Shane)
+- improved support for S/Mime X.509 (thanks Gyuris)
+- better welcome app
+- support for Collection+JSON Hypermedia API (RESTful self documenting API)
+- jQuery 1.11
+- codemirror 4.0.3
+- markdown2 2.2.3
+- memcache 1.53
+- support for the new janrain API
+- new "web2py.py -G config" to make GAE configuration easier
+- many small bug fixes
+
+## 2.9.1 - 2.9.5
+
+- many small but important bug fixes
+- jquery 1.11
+- codemirror 3.21, thanks Paolo Valleri
+- fixed security issue with sessions in database, thanks Nathan Humphreys
+- fixed security issue with persistant data in session, thanks Kiran
+- fixed security issue with redirect after expired login, thanks André Kablu
+- cleaner DAL and rname integration, thanks niphlod and Michele
+- added mongodb and imap tests for dal, thanks Alan
+- NoSQL dal tests, thanks Alan
+- better docstrings, thanks Niphlod
+- allow URL(...,language=...) with parametric router, thanks Jonathan
+- allow non-expiration of gae-memcache, thanks crimsoncantab
+- MARKMIN(...,_class='...'), thanks Luca
+- better transliteration in building slugs
+- autolink emails
+- new Janrain API, thanks PeterQ2
+- enable admin app for GAE (experimental), thanks Alan
+- many bug fixes
+- invalidate function in web2py.js, thanks Paolo
+- DAL(...,adapter_args=dict(engine='MyISAM'))
+- todolist panel in admin editor, thanks Paolo Valleri
+
+## 2.8.1
+
+- no more winservice (use nssm instead)
+- better imap support in DAL
+- db().select().as_tree()
+- bootstrap 2.3.2
+- codemirror 3.19
+- improved  mongoDB support, thanks Alan
+- support for wiki custom render function
+- Wiki(...groups=['x','y']) allows bypassing default permissions
+- fixed websocket_messaging.py to support newer Tornado
+- NDB support for GAE, thanks Quint
+- fixed major concurrecy issue with MEMDB
+- blocked generic.jsonp for security reasons
+- many bug fixes, thanks Niphlod, Michele, Anthony, Tim, and many others.
+
+## 2.7.1 - 2.7.4
+
+- jQuery 1.10.2
+- codemirror 3.18, thanks Paolo
+- namespaces in T("Welcome", ns="namespace"), thanks jamarcer (experimental)
+- more Auth options, thanks Charles
+- more admin configuration, thanks Roberto
+- new gluon.contrib.strip.StripeForm for PCI compliant payments
+- webclient can hendle lists, thanks Yair
+- allows SQLFORM.grid(...,ignore_common_filters=True)
+- more translations, thanks Vladyslav
+- better session2trash.py, works with scheduler, thanks niphlod
+- fixed problem with ENABLED/DISABLED
+- many bug fixes, thanks niphlod, michele, anthony, roberto, tim, and others
+
+## 2.6.1 - 2.6.4
+
+Attention all users: For pre 2.6 applications to work with web2py >=2.6, you must copy static/js/web2py.js, controllers/appadmin.py, and views/appadmin.html from the welcome app to your own apps (all of them).
+
+Attention production users: The updated handlers and examples are in handlers/ and examples/. The updated ones will not override the existing ones. To use the new ones it is not sufficient to upgrade web2py, you also need to copy the desired handler/example in the root web2py/ folder.
+
+Attention MySQL users: The length of string fields changed from 255 to 512 bytes. If you have migrations enabled this will trigger a large migration. To prevent it, first set migrate_enabled=False, upgrade, check everything is ok, then add length=255 to your string Fields, then re-enable migrations with migrate_enabled=True if needed.
+
+- better directory structure: handlers/ extras/ examples/
+- better MongoDb support, thanks Alan
+- better Admin editor interface, thanks Paolo, Roberto (codemirror 3), and Lightdot
+- better layout.html and web2py_bootstrap.css, thanks Paolo
+- refactored web2py.js makes code more readable, thanks Niphlod
+- compute fields can depend on other compute(d) fields
+- more functions in appadmin (/manage/auth), thanks Anthony
+- support for CAST in SQL generation
+- new API jQuery('#component').reload()
+- new API rows.render()
+- new API table.field.referent, table._references
+- new API db(...).validate_and_update(...)
+- new API Wiki(..., force_render=True) renders the page source again instead of using cached
+- Wiki now automatically parses named component arguments @{f:a=1,b='twp',c=variable}
+- auth.get_or_create_user(login=False)
+- auth = Auth(crsf_protection = False) prevents creating sessions in login/register forms.
+- enable multiple renderers in wiki, thanks Alan
+- log messages from Auth are no longer translated (for speed and readability)
+- update jQuery mobile to 1.3.1
+- reduced memory footprint by conditionally loading Tk
+- faster pbkdf2 uses OpenSSL, thanks Michele
+- many speed improvements, thanks Michele
+- better session logic, prevents false positive when detecting session changes.
+- scripts/import_static.py converts a static site to a web2py app (experimental)
+- support for new http error code 451
+- profiler saves dump in dir, thanks Niphlod
+- upgraded pyfpdf, thanks Mariano
+- gluon/contrib/pdfinvoice.py for generating PDF invoices (assumes reportlab)
+- no more double submission of forms (even without crsf protection), thanks Niphlod
+- speedup for define_table, thanks Michele
+- settings.cfg to admin, thanks Paolo
+- many bugs fixed, thanks Niphlod, Michele, Roberto, Jonathan, and many others
+- 2.6,3 specifically fixed a possible DoS vulnerability
+- 2.6.4 specifically fixes major problem introduced in 2.6.1 with session logic
+
+## 2.5.2
+
+- Web editor with tabs, thanks ilvalle
+
+## 2.5.1
+
+- New style virtual fields in grid
+- Conditional fields (experimental) ``db.table.field.show_if = db.table.otherfield==True`` or ``db.table.field.show_if = db.table.otherfiel.contains(values)``
+- auth.settings.manager_group_role="manager" enables http://.../app/appadmin/auth_manage and http://.../app/appadmin/manage for members of the "manager" group. (also experimental)
+- support for POST variables in DELETE
+- Fixed memory leak when using the TAG helper
+
+
+## 2.4.7
+
+- pypy support, thanks Niphlod
+- more bug fixes
+- ...
+
+## 2.4.6
+
+- better tests
+- new ANY_OF and IS_IPV6 validators
+- new custom save option
+- many small bug fixes
+
+## 2.4.5
+
+- travis.ci integration (thanks Marc Abramowitz and Niphlod). Passes all tests (thanks Niplod).
+- IS_DATE and IS_DATETIME can specify timezone
+
+## 2.4.1- 2.4.3
+
+- 2D GEO API: geoPoint, getLine, geoPolygon
+- support for 'json' field type in DAL
+- schema export with db.as_json/as_xml, thanks Alan
+- graph representation of models
+- support for semantic versioning
+- new bootstrap based admin, thanks Paolo
+- improved scheduler (and change in scheduler field names), thanks Niphlod
+- graphviz support added to adm, thanks Jose
+- on_failure in grid
+- db.table.field.abs()
+- better wiki
+- geoPoint, getLine, geoPolygon
+- better reporting of 500 ajax errors
+- better grid
+- improved/fixed mongodb support
+- improved parse_as_rest(patterns=...), thanks Denes
+- improved IMAP DAL support, thanks Alan
+- improved security when cookies in sessions
+- Row.as_xml, as_json, as_dict, as_yaml thanks Alan
+- smarter custom_import
+- setup-ubuntu-12-04-redmine-unicorn-web2py-uwsgi-nginx.sh
+- added support for motor and pulsar servers, thanks Niphlod
+- added json-rpc2 support
+- added pypyodbc.py driver
+- allow auth.settings.ondelete='CASCADE'
+- new syntax IS_EXPR(lambda value: ...
+- using google for QR codes (although Graph API will be deprecated in 2015)
+- upgraded fpdf to 1.7.1
+- bug fixes (including issues with calendar.js and archive tables)
+
+## 2.3.1 - 2.3.2
+
+- new virtual fields syntax:
+  ``db.define_table('person',Field('name'),Field.Virtual('namey',lambda row: row.person.name+'y'))``
+- db.thing(name='Cohen',_orderby=db.thing.name), thanks Yair
+- made many modules Python 3.3 friendly (compile but not tested)
+- better welcome css, thanks Paolo
+- jQuery 1.8.3
+- Bootstrap 2.2.2
+- Modernizr 2.6.2 (custom full options)
+- integration with analyitics.js (0.2.0)
+- better scheduler, thanks Niphlod
+- page and media preview in wiki, thanks Niphlod
+- create new auth.wiki page from slug model, thanks Nico
+- conditional menus with auth.wiki(menugroups=['wiki_editor'])
+- better security in grid/smartgrid
+- allow LOADing multiple grids, thanks Niphlod
+- auth.settings.login_onfail, thanks Yair
+- better handling of session files for speed
+- added heroku support (experimental)
+- added rocket support for IPV6, thanks Chirs Winebrinner
+- more customizable menus with MENU(li_first, li_last..)
+- added support for paymentech (gluon/contrib/paymentech.py)
+- fixed broken cron
+- fixed possible xss with share.js
+- many bug fixes. Closed more than 50 tickets since 2.2.1
+
+## 2.2.1
+
+- session.connect(cookie_key='secret', compression_level=9) stores sessions in cookies
+- T.is_writable = False prevents T from dynamically updating langauge files
+- all code is more PEP8 compliant
+- better custom_importer behaviour (now works per app, is smalled and faster)
+- fixed some bugs
+- upgraded feedparser.py and rss2.py
+- codemirror has autoresize
+
+## 2.1.0
+
+- overall faster web2py
+- when apps are deleted, a w2p copy is left in deposit folder
+- change in cron (it is now disabled by default). removed -N option and introduced -Y.
+- faster web2py_uuid() and request initialization logic, thanks Michele
+- static asset management, thanks Niphlod
+- improved mobile admin
+- request.requires_https and Auth(secure=True), thanks Yarin and Niphlod
+- better custom_import (works per app and is faster), thanks Michele
+- redis_sesssion.py, thanks Niphlod
+- allow entropy computation in IS_STRONG and web2py.js, thanks Jonathan and Niphlod
+- fixed many aith.wiki problems
+- support for auth.wiki(render='html')
+- better welcome layout, thanks Paolo
+- db.define_table(...,redefine=True)
+- DAL, Row, and Rows object can now be pickled/unpickled, thanks to zombie DAL.
+- admin uses codemirror
+- allow syntax auth = Auth(db).define_tables()
+- better auth.wiki with preview, thanks Alan
+- better auth.impersonate, thanks Alan
+- upgraded jQuery 1.8
+- upgraded Bootstrap 2.1
+- fixed problem with dropbox_account.py
+- many fixes to cache.ram, cache.disk, memcache and gae_memcache
+- cache.with_prefix(cache.ram,'prefix')
+- db.table.field.epoch() counts seconds from epoch
+- DAL support for SQL CASE, example: db().select(...query.case('true','false))
+- DAL(...,do_connect=False) allows faking connections
+- DAL(...,auto_import=True) now retieves some fiel attributes
+- mail can specify a sender: mail.send(...,sender='Mr X <%(sender)s>')
+- renamed gluon/contrib/comet_messaging.py -> gluon/contrib/websocket_messaging.py
+
+## 2.0.1-11
+
+### DAL Improvements
+
+- Support for DAL(lazy_tables=True) and db.define_table(on_define=lambda table:), thanks Jonathan
+- db(...).select(cacheable=True) make select 30% faster
+- db(...).select(cache=(cache.ram,3600)) now caches parsed data 100x faster
+- db(...).count(cache=(cache.ram,3600)) now supported
+- MongoDB support in DAL (experimental), thanks Mark Breedveld
+- geodal and spatialite, thanks Denes and Fran (experimental)
+- db.mytable._before_insert, _after_insert, _before_update, _after_update, _before_delete. _after_delete (list of callbacks)
 - db(...).update_naive(...) same as update but ignores table._before_update and table._after_update
-- SQLFORM.smartdictform
-- form.add_button(value,link)
-- db.table.insert(uploadfield=open(....))
 - DAL BIGINT support and DAL(...,bigint_id=True)
-- auth.settings.everybody_group_id
-- ace text web editor in admin
-- -E -b -L options for scheduler
-- coffee and less support in response.fields, thanks Sam Sheftel
-- ldap certificate support
-- pg8000 postgresql driver support
-- portable html.py
-- <i> to <em> in markmin
-- new admin pages: manage_students, bulk_regsiter, and progress reports
-- @cache('%(name)s%(args)s%(vars)s',5) and cache.autokey
-- added tox.ini, thanks Marc
-- better mongodb support (still experimental) thanks Mark
-- web2py.py --run_system_tests, thanks Marc Abramowitz
+- IS_IN_DB(..., distinct=True)
+- new syntax: db.mytable.insert(myuploadfield=open(....)), thank you Iceberg
+- db(...).select(db.mytable.myfield.count(distinct=True))
+- db(db.a)._update(name=db(db.b.a==db.a.id).nested_select(db.b.id))
+- db.mytable.myfield.filter_in, filter_out
+- db.mytable._enable_record_versioning(db) adds versioning to this table
 - teradata adapter, thanks Andrew Willimott
 - experimental Sybase Adapter
 - added db.table.field.avg()
-- db(db.a)._update(name=db(db.b.a==db.a.id).nested_select(db.b.id))
-- new layout based on bootstrap and bootswatch
+- Support for Google App Engine projections, thanks Christian
+- Field(... 'upload', default=path) now accepts a path to a local file as default value, if user does not upload a file. Relative path looks inside current application folder, thanks Marin
+- executesql(...,fields=,columns=) allows parsing of results in Rows, thanks Anthony
+- Rows.find(lambda row: bool(), limitby=(0,1))
+
+### Auth improvements
+
+- auth.enable_record_versioning(db)  adds full versioning to all tables
+- @auth.requires_login(otherwise=URL(...))
+- auth supports salt and compatible with third party data, thanks Dave Stoll
+- CRYPT now defaults to pbkdf2(1000,20,sha1)
+- Built-in wiki with menu, tags, search, media, permissions. def index: return auth.wiki()
+- auth.settings.everybody_group_id
+- allow storage of uploads on any PyFileSystem (including amazon)
+
+### Form improvements
+
+- FORM.confirm('Are you sure?',{'Back':URL(...)})
+- SQLFORM.smartdictform(dict)
+- form.add_button(value,link)
+- SQLFORM.grid(groupby='...')
+- fixed security issue with SQLFORM.grid and SQLFORM.smartgrid
+- more export options in SQLFORM.grid and SQLFORM.smartgrid (html, xml, csv, ...)
+
+### Admin improvements
+
+- new admin pages: manage_students, bulk_regsiter, and progress reports
+- increased security in admin against CSRF
+- experimental Git integration
+- experimental OpenShift deployment
+- multi-language pluralization engine
+- ace text web editor in admin
 - Ukrainian translations, thanks Vladyslav Kozlovskyy
 - Romanian translation for welcome, thanks ionel
 - support for mercurial 2.6, thanks Vlad
-- GAE projections
-- SQLFORM.grid(groupby=...')
-- db.table.field.filter_in, filter_out
-- allowed storage of uploads on any PyFileSystem (including amazon)
+
+### Scheduler Improvements (thanks to niphlod, ykessler, dhx, toomim)
+
+- web2py.py -K myapp -X starts the myapp scheduler alongside the webserver
+- tasks are marked EXPIRED (if stop_time passed)
+- functions with no result don't end up in scheduler_run
+- more options: web2py.py -E -b -L
+- scheduler can now handle 10k tasks with 20 concurrent workers and with no issues
+- new params:
+    tasks can be found in the environment (no need to define the tasks parameter)
+    max_empty_runs kills the workers automatically if no new tasks are found in queue (nice for "spikes" of processing power)
+    discard_results to completely discard the results (if you don't need the output of the task)
+    utc_time enables datetime calculations with UTC time
+- scheduler_task changes:
+    task_name is no longer required (filled automatically with function_name if found empty)
+    uuid makes easy to coordinate scheduler_task maintenance (filled automatically if not provided)
+    stop_time has no default (previously was today+1)
+    retry_failed to requeue automatically failed tasks
+    sync_output refreshes automatically the output (nice to report percentages)
+- workers can be:
+    DISABLED (put to sleep and do nothing if not sending the heartbeat every 30 seconds)
+    TERMINATE (complete the current task and then die)
+    KILL (kill ASAP)
+
+### Other Improvements
+
+- gluon/contrib/webclient.py makes it easy to create functional tests for app
+- DIV(..).elements(...replace=...), thanks Anthony
+- new layout based on Twitter Bootstrap
+- New generic views: generic.ics (Mac Mail Calendar) and generic.map (Google Maps)
+- request.args(0,default=0, cast=int, otherwise=URL(...)), thanks Anthony
+- redirect(...,type='auto') will be handled properly in ajax responses
+- routes in can redirect outside with routes_in=[('/path','303->http://..')]
+- better memcache support
+- improved spreadsheet, thanks Alan
+- new internationalization engine, thanks Vladyslav
+- pluralization engine, thanks Vladyslav
+- new markmin with support for nested lists, <i>, <em>, autolinks, thanks Vladyslav
+- new syntax: {{=BR()*5}}
+- gluon.cache.lazy_cache decorator allows caching functions in modules
+- .coffee and .less support in response.files, thanks Sam Sheftel
+- ldap certificate support
+- pg8000 postgresql driver support (experimental)
+- @cache('%(name)s%(args)s%(vars)s',5) and cache.autokey
+- added tox.ini, thanks Marc
+- web2py.py --run_system_tests, thanks Marc Abramowitz
+- html.py (and web2py helpers) can be used without web2py dependencies
+- new fpdf, thanks Mariano
+
 
 ## 1.99.5-1.99.7
 - admin in Russian (Bulat), Japanese (Omi) and Slovenian (Robert Valentak)
@@ -51,7 +408,7 @@
 - db = DAL('mongodb://127.0.0.1:5984/db') (experimental, thanks Mark Breedveld)
 - db = DAL('cubrid')  (experimental)
 - db = DAL('postgres:pg8000:...') and DAL('postgres:psycopg2:...')
-- pg8000 now ships with web2py (thanks Mariano) 
+- pg8000 now ships with web2py (thanks Mariano)
 - reponse.delimiters = ('\\[','\\]') (thanks Denes)
 - auth.user_groups stores user groups
 - auth.is_impersonating()
@@ -76,7 +433,7 @@ fixed a SQLCustomField bug
 
 ## 1.99.3
 This is a major revision in peparation for web2py 2.0
-- moved to GitHub and abandoned Lanchpad 
+- moved to GitHub and abandoned Lanchpad
 - new web site layout, thanks Anthony
 - new welcome app using skeleton, thanks Anthony
 - jQuery 1.7.1
@@ -98,7 +455,6 @@ This is a major revision in peparation for web2py 2.0
 - experimental PyPy support
 - experimental mongodb support, thanks Mark
 - tickets in db now accessible from admin, thanks Niphlod
-- many grid improvements and bug fixes
 
 
 
@@ -182,7 +538,7 @@ This is a major revision in peparation for web2py 2.0
 ## 1.96.1
 
 - "from gluon import *" imports in every python module a web2py environment (A, DIV,..SQLFORM, DAL, Field,...) including current.request, current.response, current.session, current.T, current.cache, thanks Jonathan.
-- conditional models in 
+- conditional models in
   models/<controller>/a.py and models/<controller>/<function>/a.py
 - from mymodule import *, looks for mymodule in applications/thisapp/modules first and then in sys.path. No more need for local_import. Thanks Pierre.
 - usage of generic.* views is - by default - restricted to localhost for security. This can be changed in a granular way with: response.generic_patterns=['*']. This is a slight change of behavior for new app but a major security fix.
@@ -214,7 +570,7 @@ This is a major revision in peparation for web2py 2.0
 - messages in validators have default internationalization
 - No more Auth(globals(),db), just Auth(db). Same for Crud and Service.
 - scripts/access.wsgi allows apache+mod_wsgi to delegate authentication of any URL to any web2py app
-- json now supports T(...) 
+- json now supports T(...)
 - scripts/setup-web2py-nginx-uwsgi-ubuntu.sh
 - web2py HTTP responses now set: "X-Powered-By: web2py", thanks Bruno
 - mostly fixed generic.pdf. You can view any page in PDF if you have pdflatex installed or if your html follows the pyfpdf convention.
@@ -391,7 +747,7 @@ This is a major revision in peparation for web2py 2.0
 recalled
 
 ## 1.86.1-1.86.3
-- markmin2latex 
+- markmin2latex
 - markmin2pdf
 - fixed some bugs
 - Storage getfirst, getlast, getall by Kevin and Nathan
@@ -421,7 +777,7 @@ recalled
 - Polymmodel support on GAE
 - Experimental ListWidget
 - moved DAL and routes to thread.local (thanks Jonathan, again)
-- scripts/extract_mysql_models.py, thanks Falko Krause and Ron McOuat 
+- scripts/extract_mysql_models.py, thanks Falko Krause and Ron McOuat
 - scripts/dbsessions2trash.py, thanks Scott
 
 ## 1.83.2
@@ -523,7 +879,7 @@ recalled
 - automatic database retry connect when pooling and lost connections
 - OPTGROUP helper, thanks Iceberg
 - web2py_ajax_trap captures all form submissions, thank you Skiros
-- multicolumn checkwidget and arbitrary chars in multiple is_in_set, thanks hy 
+- multicolumn checkwidget and arbitrary chars in multiple is_in_set, thanks hy
 - Québécois for welcome, thanks Chris
 - crud.search(), thanks Mr Freeze
 - DAL(...migrate,fake_migrate), thanks Thadeus
@@ -571,7 +927,7 @@ recalled
 - fix in delete for GAE
 - auth.settings.login_captcha and auth.settings.register_captcha
 - crud.settings.create_captcha and  crud.settings.update_captcha
-- automatic update button in admin 
+- automatic update button in admin
 
 ## 1.76.1
 - editarea 0.8.2 + zencoding
@@ -665,7 +1021,7 @@ recalled
 - New get_vars and post_vars compatible in 2.5 and 2.6 (thanks Tim)
 - Major rewrite of gql.py extends DAL syntax on GAE
 - No more *.w2p, welcome.w2p is create automatically, base apps are always upgraded
-- export_to_csv(delimiter = ',', quotechar = '"', quoting = csv.QUOTE_MINIMAL), thanks Thadeus 
+- export_to_csv(delimiter = ',', quotechar = '"', quoting = csv.QUOTE_MINIMAL), thanks Thadeus
 
 ## 1.73.1
 - Fixed problem with storage and comparison of Row objects
@@ -876,7 +1232,7 @@ recalled
 - fixing lots of small bugs with tool and languages
 - jquery.1.3.2
 
-## 
+##
 
 - One more feature in trunk....
 
@@ -910,7 +1266,7 @@ recalled
 - passes all unittest but test_rewite (not sure it should pass that one)
 
 - Lots of patches from Fran Boone (about tools) and Dougla Soares de Andarde (Python 2.6 compliance, user use of hashlib instead of md5, new markdown2.py)
-- db.define_table('mytable',db.Field('somefield'),timestamp) 
+- db.define_table('mytable',db.Field('somefield'),timestamp)
 Example:
 ``
 timestamp=SQLTable(None,'timestamp',
@@ -1079,7 +1435,7 @@ db.define_table('cirlce',
 - fixed a bug in sql belongs
 
 ## web2py 1.20
-- new IFRAME, LABEL, FIELDSET validators 
+- new IFRAME, LABEL, FIELDSET validators
 - P(..cr2br=True) option
 - FORM and SQLFORM have hidden=dict(...) option for REST
 - testing framework.
@@ -1113,7 +1469,7 @@ db.define_table('cirlce',
 - Although we are not infringing the trademark since this is a non-commercial
 - product we could have run into some issues. So we have been professional
 - and changed the name to web2py.
-- Now SQLFORMs and FORM can have a formname and multiple forms are allowed 
+- Now SQLFORMs and FORM can have a formname and multiple forms are allowed
 - per page.
 - A new examples/default/index page.
 - web2py.py instead of runme.py
@@ -1141,7 +1497,7 @@ db.define_table('cirlce',
 - New applications/examples/controller/global.py controller for docs.
 
 ## Gluon v1.12
-- in sql.py 
+- in sql.py
 - handles NULL values properly
 - unicode support (data always stored in utf-8)
 - 'date' -> datetime.date ,'time' -> datetime.time, 'datetime' -> datetime.datetime, 'boolean' -> True/False
@@ -1207,7 +1563,7 @@ db.define_table('cirlce',
 - bug in sqlhtml with JOINS queries
 
 ## EWF v1.7 -> Gluon v1.0
-- Name change 
+- Name change
 - Improved layout.html
 
 ## EWF v1.6 -> v1.7
@@ -1218,4 +1574,3 @@ db.define_table('cirlce',
 ## EWF v1.5 -> v1.6  (2007)
 - load and save .py in ascii, avoids problem with LF+CR on windows
 - added path.join in compileapp, fixed problem with Windows compileapp
-

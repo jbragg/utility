@@ -1,10 +1,16 @@
 {{extend 'layout.html'}}
-
+{{
+dlg = dialog
+smt_button = dlg.element(_type="submit")
+smt_button['_class'] = 'btn'
+smt_button['_style'] = 'margin-right:4px;'
+ccl_button = dlg.element(_type="button")
+ccl_button['_class'] = 'btn'
+}}
 {{block sectionclass}}delete_plugin{{end}}
-
-<div class="center">
+<!-- begin "delete_plugin" block -->
 <h2>{{=T('Are you sure you want to delete plugin "%s"?', plugin)}}</h2>
-<p>{{=FORM(INPUT(_type='submit',_name='nodelete',_value=T('NO')))}}</p>
-<p>{{=FORM(INPUT(_type='submit',_name='delete',_value=T('YES')))}}</p>
+<div class="center">
+{{=dialog}}
 </div>
-
+<!-- end "delete_plugin" block -->
