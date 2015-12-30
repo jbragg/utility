@@ -200,8 +200,11 @@ class IS_MATCH(Validator):
         self.is_unicode = is_unicode
 
     def __call__(self, value):
-        if self.is_unicode and not isinstance(value, unicode):
-            match = self.regex.search(str(value).decode('utf8'))
+        if self.is_unicode:
+            if isinstance(value,unicode):
+                match = self.regex.search(value)
+            else:
+                match = self.regex.search(str(value).decode('utf8'))
         else:
             match = self.regex.search(str(value))
         if match is not None:
@@ -691,7 +694,7 @@ class IS_NOT_IN_DB(Validator):
                 return (value, translate(self.error_message))
         else:
             row = subset.select(table._id, field, limitby=(0, 1), orderby_on_limitby=False).first()
-            if row and str(row.id) != str(id):
+            if row and str(row[table._id]) != str(id):
                 return (value, translate(self.error_message))
         return (value, None)
 
@@ -2162,29 +2165,22 @@ class IS_DATE(Validator):
             INPUT(_type='text', _name='name', requires=IS_DATE())
 
     date has to be in the ISO8960 format YYYY-MM-DD
-    timezome must be None or a pytz.timezone("America/Chicago") object
     """
 
     def __init__(self, format='%Y-%m-%d',
-                 error_message='Enter date as %(format)s',
-                 timezone=None):
+                 error_message='Enter date as %(format)s'):
         self.format = translate(format)
         self.error_message = str(error_message)
-        self.timezone = timezone
         self.extremes = {}
 
     def __call__(self, value):
         ovalue = value
         if isinstance(value, datetime.date):
-            if self.timezone is not None:
-                value = value - datetime.timedelta(seconds=self.timezone*3600)
             return (value, None)
         try:
             (y, m, d, hh, mm, ss, t0, t1, t2) = \
                 time.strptime(value, str(self.format))
             value = datetime.date(y, m, d)
-            if self.timezone is not None:
-                value = self.timezone.localize(value).astimezone(utc)
             return (value, None)
         except:
             self.extremes.update(IS_DATETIME.nice(self.format))
@@ -2200,11 +2196,7 @@ class IS_DATE(Validator):
         format = format.replace('%Y', y)
         if year < 1900:
             year = 2000
-        if self.timezone is not None:
-            d = datetime.datetime(year, value.month, value.day)
-            d = d.replace(tzinfo=utc).astimezone(self.timezone)
-        else:
-            d = datetime.date(year, value.month, value.day)
+        d = datetime.date(year, value.month, value.day)
         return d.strftime(format)
 
 
@@ -2255,7 +2247,8 @@ class IS_DATETIME(Validator):
                 time.strptime(value, str(self.format))
             value = datetime.datetime(y, m, d, hh, mm, ss)
             if self.timezone is not None:
-                value = self.timezone.localize(value).astimezone(utc)
+                # TODO: https://github.com/web2py/web2py/issues/1094 (temporary solution)
+                value = self.timezone.localize(value).astimezone(utc).replace(tzinfo=None)
             return (value, None)
         except:
             self.extremes.update(IS_DATETIME.nice(self.format))
@@ -2304,8 +2297,7 @@ class IS_DATE_IN_RANGE(IS_DATE):
                  minimum=None,
                  maximum=None,
                  format='%Y-%m-%d',
-                 error_message=None,
-                 timezone=None):
+                 error_message=None):
         self.minimum = minimum
         self.maximum = maximum
         if error_message is None:
@@ -2317,8 +2309,7 @@ class IS_DATE_IN_RANGE(IS_DATE):
                 error_message = "Enter date in range %(min)s %(max)s"
         IS_DATE.__init__(self,
                          format=format,
-                         error_message=error_message,
-                         timezone=timezone)
+                         error_message=error_message)
         self.extremes = dict(min=self.formatter(minimum),
                              max=self.formatter(maximum))
 
@@ -2844,9 +2835,11 @@ class CRYPT(object):
         self.salt = salt
 
     def __call__(self, value):
-        value = value and value[:self.max_length]
-        if len(value) < self.min_length:
+        v = value and str(value)[:self.max_length]
+        if not v or len(v) < self.min_length:
             return ('', translate(self.error_message))
+        if isinstance(value, LazyCrypt):
+            return (value, None)
         return (LazyCrypt(self, value), None)
 
 #  entropy calculator for IS_STRONG
@@ -3374,7 +3367,8 @@ class IS_IPV4(Validator):
                     (number == self.localhost)):
                     ok = False
             if not (self.is_private is None or self.is_private ==
-                    (sum([number[0] <= number <= number[1] for number in self.private]) > 0)):
+                    (sum([private_number[0] <= number <= private_number[1]
+                          for private_number in self.private]) > 0)):
                     ok = False
             if not (self.is_automatic is None or self.is_automatic ==
                     (self.automatic[0] <= number <= self.automatic[1])):
@@ -3479,7 +3473,7 @@ class IS_IPV6(Validator):
             from gluon.contrib import ipaddr as ipaddress
 
         try:
-            ip = ipaddress.IPv6Address(value)
+            ip = ipaddress.IPv6Address(value.decode('utf-8'))
             ok = True
         except ipaddress.AddressValueError:
             return (value, translate(self.error_message))
@@ -3491,7 +3485,7 @@ class IS_IPV6(Validator):
                 self.subnets = [self.subnets]
             for network in self.subnets:
                 try:
-                    ipnet = ipaddress.IPv6Network(network)
+                    ipnet = ipaddress.IPv6Network(network.decode('utf-8'))
                 except (ipaddress.NetmaskValueError, ipaddress.AddressValueError):
                     return (value, translate('invalid subnet provided'))
                 if ip in ipnet:
@@ -3700,20 +3694,22 @@ class IS_IPADDRESS(Validator):
 
     def __call__(self, value):
         try:
-            import ipaddress
+            from ipaddress import ip_address as IPAddress
+            from ipaddress import IPv6Address, IPv4Address
         except ImportError:
-            from gluon.contrib import ipaddr as ipaddress
+            from gluon.contrib.ipaddr import (IPAddress, IPv4Address,
+                                              IPv6Address)
 
         try:
-            ip = ipaddress.IPAddress(value)
-        except ValueError, e:
+            ip = IPAddress(value.decode('utf-8'))
+        except ValueError:
             return (value, translate(self.error_message))
 
-        if self.is_ipv4 and isinstance(ip, ipaddress.IPv6Address):
+        if self.is_ipv4 and isinstance(ip, IPv6Address):
             retval = (value, translate(self.error_message))
-        elif self.is_ipv6 and isinstance(ip, ipaddress.IPv4Address):
+        elif self.is_ipv6 and isinstance(ip, IPv4Address):
             retval = (value, translate(self.error_message))
-        elif self.is_ipv4 or isinstance(ip, ipaddress.IPv4Address):
+        elif self.is_ipv4 or isinstance(ip, IPv4Address):
             retval = IS_IPV4(
                 minip=self.minip,
                 maxip=self.maxip,
@@ -3723,7 +3719,7 @@ class IS_IPADDRESS(Validator):
                 is_automatic=self.is_automatic,
                 error_message=self.error_message
                 )(value)
-        elif self.is_ipv6 or isinstance(ip, ipaddress.IPv6Address):
+        elif self.is_ipv6 or isinstance(ip, IPv6Address):
             retval = IS_IPV6(
                 is_private=self.is_private,
                 is_link_local=self.is_link_local,

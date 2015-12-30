@@ -7,7 +7,7 @@ from .._globals import IDENTITY, THREAD_LOCAL
 from .._gae import classobj, gae, ndb, namespace_manager, NDBPolyModel, rdbms
 from ..objects import Table, Field, Expression, Query
 from ..helpers.classes import SQLCustomType, SQLALL, \
-    Reference, UseDatabaseStoredFile
+    Reference, UseDatabaseStoredFile, FakeDriver
 from ..helpers.methods import use_common_filters, xorify
 from ..helpers.gae import NDBDecimalProperty
 from ..helpers.serializers import serializers
@@ -48,8 +48,8 @@ class GoogleSQLAdapter(UseDatabaseStoredFile, MySQLAdapter):
         instance = credential_decoder(m.group('instance'))
         self.dbstring = db = credential_decoder(m.group('db'))
         driver_args['instance'] = instance
-        if not 'charset' in driver_args:
-            driver_args['charset'] = 'utf8'
+        # if not 'charset' in driver_args:
+        #     driver_args['charset'] = 'utf8'
         self.createdb = createdb = adapter_args.get('createdb',True)
         if not createdb:
             driver_args['database'] = db
@@ -97,8 +97,6 @@ class GoogleDatastoreAdapter(NoSQLAdapter):
     MAX_FETCH_LIMIT = 1000000
     uploads_in_blob = True
     types = {}
-    # reconnect is not required for Datastore dbs
-    reconnect = lambda *args, **kwargs: None
 
     def file_exists(self, filename): pass
     def file_open(self, filename, mode='rb', lock=True): pass
@@ -131,19 +129,30 @@ class GoogleDatastoreAdapter(NoSQLAdapter):
                 'list:integer': (lambda **kwargs: ndb.IntegerProperty(repeated=True,default=None, **kwargs)),
                 'list:reference': (lambda **kwargs: ndb.IntegerProperty(repeated=True,default=None, **kwargs)),
                 })
-        self.db = db
-        self.uri = uri
+
+        super(GoogleDatastoreAdapter, self).__init__(
+            db=db,
+            uri=uri,
+            pool_size=pool_size,
+            folder=folder,
+            db_codec='UTF-8',
+            credential_decoder=credential_decoder,
+            driver_args=driver_args,
+            adapter_args=adapter_args,
+            do_connect=do_connect,
+            after_connection=after_connection)
+
         self.dbengine = 'google:datastore'
-        self.folder = folder
         db['_lastsql'] = ''
-        self.db_codec = 'UTF-8'
-        self._after_connection = after_connection
-        self.pool_size = 0
         match = self.REGEX_NAMESPACE.match(uri)
         if match:
             namespace_manager.set_namespace(match.group('namespace'))
 
         self.ndb_settings = adapter_args.get('ndb_settings')
+
+        # connections and reconnect are not required for Datastore dbs
+        self.connector = FakeDriver
+        self.reconnect()
 
     def parse_id(self, value, field_type):
         return value
@@ -311,6 +320,11 @@ class GoogleDatastoreAdapter(NoSQLAdapter):
             raise SyntaxError("Not supported")
         if not isinstance(second, list):
             second = list(second)
+        if len(second) == 0:
+            # return a filter which will return a null set
+            f = self.EQ(first,0)
+            f.filter_all = True
+            return f
         return self.gaef(first,'in',second)
 
     def CONTAINS(self,first,second,case_sensitive=False):
@@ -327,7 +341,7 @@ class GoogleDatastoreAdapter(NoSQLAdapter):
         elif op == self.EQ:
             r = self.gaef(f, '!=', s)
         elif op == self.NE:
-            r = self.gaef(f, '==', s)
+            r = self.gaef(f, '=', s)
         elif op == self.LT:
             r = self.gaef(f, '>=', s)
         elif op == self.LE:
@@ -409,6 +423,8 @@ class GoogleDatastoreAdapter(NoSQLAdapter):
 
         if filters == None:
             items = tableobj.query(default_options=qo)
+        elif hasattr(filters,'filter_all') and filters.filter_all:
+            items = []
         elif (hasattr(filters,'_FilterNode__name') and
             filters._FilterNode__name=='__key__' and
             filters._FilterNode__opsymbol=='='):

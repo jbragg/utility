@@ -41,6 +41,8 @@ class SQLiteAdapter(BaseAdapter):
 
     @staticmethod
     def web2py_regexp(expression, item):
+        if item is None:
+            return False
         return re.compile(expression).search(item) is not None
 
     def __init__(self, db, uri, pool_size=0, folder=None, db_codec ='UTF-8',
@@ -91,9 +93,6 @@ class SQLiteAdapter(BaseAdapter):
         return ['DELETE FROM %s;' % tablename,
                 "DELETE FROM sqlite_sequence WHERE name='%s';" % tablename]
 
-    def lastrowid(self, table):
-        return self.cursor.lastrowid
-
     def REGEXP(self,first,second):
         return '(%s REGEXP %s)' % (self.expand(first),
                                    self.expand(second,'string'))
@@ -126,7 +125,7 @@ class SQLiteAdapter(BaseAdapter):
 
 
 SPATIALLIBS = {
-    'Windows':'libspatialite',
+    'Windows':'mod_spatialite.dll',
     'Linux':'libspatialite.so',
     'Darwin':'libspatialite.dylib'
     }

@@ -11,144 +11,109 @@ import shutil
 import sys
 import types
 
-from ._compat import StringIO, ogetattr, osetattr, pjoin, exists, hashlib_md5
+from ._compat import PY2, StringIO, pjoin, exists, hashlib_md5, \
+    integer_types, basestring, iteritems, xrange, implements_iterator, \
+    implements_bool, copyreg, reduce
 from ._globals import DEFAULT, IDENTITY, AND, OR
 from ._gae import Key
 from .exceptions import NotFoundException, NotAuthorizedException
 from .helpers.regex import REGEX_TABLE_DOT_FIELD, REGEX_ALPHANUMERIC, \
     REGEX_PYTHON_KEYWORDS, REGEX_STORE_PATTERN, REGEX_UPLOAD_PATTERN, \
-    REGEX_CLEANUP_FN
+    REGEX_CLEANUP_FN, REGEX_VALID_TB_FLD
 from .helpers.classes import Reference, MethodAdder, SQLCallableList, SQLALL, \
-    Serializable
+    Serializable, BasicStorage
 from .helpers.methods import list_represent, bar_decode_integer, \
     bar_decode_string, bar_encode, archive_record, cleanup, \
     use_common_filters, pluralize
 from .helpers.serializers import serializers
 
+long = integer_types[-1]
+
 DEFAULTLENGTH = {'string': 512, 'password': 512, 'upload': 512, 'text': 2**15,
                  'blob': 2**31}
 
 
-class Row(object):
+class Row(BasicStorage):
 
     """
     A dictionary that lets you do d['a'] as well as d.a
     this is only used to store a `Row`
     """
 
-    __init__ = lambda self, *args, **kwargs: self.__dict__.update(
-        *args, **kwargs)
-
     def __getitem__(self, k):
-        if isinstance(k, Table):
-            try:
-                return ogetattr(self, k._tablename)
-            except (KeyError, AttributeError, TypeError):
-                pass
-        elif isinstance(k, Field):
-            try:
-                return ogetattr(self, k.name)
-            except (KeyError, AttributeError, TypeError):
-                pass
-            try:
-                return ogetattr(ogetattr(self, k.tablename), k.name)
-            except (KeyError, AttributeError, TypeError):
-                pass
-
         key = str(k)
-        _extra = ogetattr(self, '__dict__').get('_extra', None)
+        _extra = super(Row, self).get('_extra', None)
         if _extra is not None:
             v = _extra.get(key, DEFAULT)
             if v != DEFAULT:
                 return v
+
         try:
-            return ogetattr(self, key)
-        except (KeyError, AttributeError, TypeError):
+            return BasicStorage.__getattribute__(self, key)
+        except AttributeError:
             pass
 
         m = REGEX_TABLE_DOT_FIELD.match(key)
         if m:
             try:
-                return ogetattr(self, m.group(1))[m.group(2)]
-            except (KeyError, AttributeError, TypeError):
-                key = m.group(2)
-        try:
-            return ogetattr(self, key)
-        except (KeyError, AttributeError, TypeError), ae:
+                e = super(Row, self).__getitem__(m.group(1))
+                return e[m.group(2)]
+            except (KeyError, TypeError):
+                pass
+            key = m.group(2)
             try:
-                self[key] = ogetattr(self, '__get_lazy_reference__')(key)
+                return super(Row, self).__getitem__(key)
+            except KeyError:
+                pass
+        try:
+            e = super(Row, self).get('__get_lazy_reference__')
+            if e is not None and callable(e):
+                self[key] = e(key)
                 return self[key]
-            except:
-                raise ae
+        except Exception as e:
+            raise e
 
-    __setitem__ = lambda self, key, value: setattr(self, str(key), value)
+        raise KeyError
 
-    __delitem__ = object.__delattr__
+    __str__ = __repr__ = lambda self: '<Row %s>' % self.as_dict(custom_types=[LazySet])
 
-    __copy__ = lambda self: Row(self)
+    __int__ = lambda self: self.get('id')
+
+    __long__ = lambda self: long(self.get('id'))
 
     __call__ = __getitem__
 
-
-    def get(self, key, default=None):
+    def __getattr__(self, k):
         try:
-            return self.__getitem__(key)
-        except(KeyError, AttributeError, TypeError):
-            return self.__dict__.get(key,default)
+            return self.__getitem__(k)
+        except KeyError:
+            raise AttributeError
 
-    has_key = __contains__ = lambda self, key: key in self.__dict__
+    def __copy__(self):
+        return Row(self)
 
-    __nonzero__ = lambda self: len(self.__dict__)>0
-
-    update = lambda self, *args, **kwargs:  self.__dict__.update(*args, **kwargs)
-
-    keys = lambda self: self.__dict__.keys()
-
-    items = lambda self: self.__dict__.items()
-
-    values = lambda self: self.__dict__.values()
-
-    __iter__ = lambda self: self.__dict__.__iter__()
-
-    iteritems = lambda self: self.__dict__.iteritems()
-
-    __str__ = __repr__ = lambda self: '<Row %s>' % self.as_dict()
-
-    __int__ = lambda self: object.__getattribute__(self,'id')
-
-    __long__ = lambda self: long(object.__getattribute__(self,'id'))
-
-    __getattr__ = __getitem__
-
-    # def __getattribute__(self, key):
-    #     try:
-    #         return object.__getattribute__(self, key)
-    #     except AttributeError, ae:
-    #         try:
-    #             return self.__get_lazy_reference__(key)
-    #         except:
-    #             raise ae
-
-    def __eq__(self,other):
+    def __eq__(self, other):
         try:
             return self.as_dict() == other.as_dict()
         except AttributeError:
             return False
 
-    def __ne__(self,other):
-        return not (self == other)
-
-    def __copy__(self):
-        return Row(dict(self))
+    def get(self, key, default=None):
+        try:
+            return self.__getitem__(key)
+        except(KeyError, AttributeError, TypeError):
+            return default
 
     def as_dict(self, datetime_to_str=False, custom_types=None):
-        SERIALIZABLE_TYPES = [str, unicode, int, long, float, bool, list, dict]
+        SERIALIZABLE_TYPES = [str, int, float, bool, list, dict]
+        if PY2:
+            SERIALIZABLE_TYPES += [unicode, long]
         if isinstance(custom_types,(list,tuple,set)):
             SERIALIZABLE_TYPES += custom_types
         elif custom_types:
             SERIALIZABLE_TYPES.append(custom_types)
         d = dict(self)
-        for k in copy.copy(d.keys()):
+        for k in list(d.keys()):
             v=d[k]
             if d[k] is None:
                 continue
@@ -207,7 +172,13 @@ class Row(object):
             return item
 
 
-class Table(Serializable):
+def pickle_row(s):
+    return Row, (dict(s),)
+
+copyreg.pickle(Row, pickle_row)
+
+
+class Table(Serializable, BasicStorage):
 
     """
     Represents a database table
@@ -243,11 +214,12 @@ class Table(Serializable):
         """
         # import DAL here to avoid circular imports
         from .base import DAL
+        super(Table, self).__init__()
         self._actual = False  # set to True by define_table()
         self._db = db
         self._tablename = tablename
-        if (not isinstance(tablename, str) or tablename[0] == '_'
-            or hasattr(DAL, tablename) or '.' in tablename
+        if (not isinstance(tablename, str) or hasattr(DAL, tablename)
+            or not REGEX_VALID_TB_FLD.match(tablename)
             or REGEX_PYTHON_KEYWORDS.match(tablename)
             ):
             raise SyntaxError('Field: invalid table name: %s, '
@@ -276,9 +248,12 @@ class Table(Serializable):
         self._after_update = []
         self._after_delete = []
 
+        self._virtual_fields = []
+        self._virtual_methods = []
+
         self.add_method = MethodAdder(self)
 
-        fieldnames, newfields=set(), []
+        fieldnames, newfields = set(), []
         _primarykey = getattr(self, '_primarykey', None)
         if _primarykey is not None:
             if not isinstance(_primarykey, list):
@@ -287,7 +262,7 @@ class Table(Serializable):
                     % tablename)
             if len(_primarykey) == 1:
                 self._id = [f for f in fields if isinstance(f, Field)
-                                and f.name ==_primarykey[0]][0]
+                            and f.name == _primarykey[0]][0]
         elif not [f for f in fields if (isinstance(f, Field) and
                   f.type == 'id') or (isinstance(f, dict) and
                   f.get("type", None) == "id")]:
@@ -295,6 +270,7 @@ class Table(Serializable):
             newfields.append(field)
             fieldnames.add('id')
             self._id = field
+
         virtual_fields = []
 
         def include_new(field):
@@ -303,23 +279,25 @@ class Table(Serializable):
             if field.type == 'id':
                 self._id = field
         for field in fields:
-            if isinstance(field, (FieldMethod, FieldVirtual)):
+            if isinstance(field, (FieldVirtual, FieldMethod)):
                 virtual_fields.append(field)
-            elif isinstance(field, Field) and not field.name in fieldnames:
+            elif isinstance(field, Field) and field.name not in fieldnames:
                 if field.db is not None:
                     field = copy.copy(field)
                 include_new(field)
-            elif isinstance(field, dict) and not field['fieldname'] in fieldnames:
-                include_new(Field(**field))
             elif isinstance(field, Table):
                 table = field
                 for field in table:
-                    if not field.name in fieldnames and not field.type == 'id':
+                    if field.name not in fieldnames and field.type != 'id':
                         t2 = not table._actual and self._tablename
                         include_new(field.clone(point_self_references_to=t2))
+            elif isinstance(field, dict) and field['fieldname'] not in fieldnames:
+                include_new(Field(**field))
             elif not isinstance(field, (Field, Table)):
                 raise SyntaxError(
-                    'define_table argument is not a Field or Table: %s' % field)
+                    'define_table argument is not a Field or Table: %s' %
+                    field
+                )
         fields = newfields
         tablename = tablename
         self._fields = SQLCallableList()
@@ -428,7 +406,7 @@ class Table(Serializable):
 
     def _validate(self, **vars):
         errors = Row()
-        for key, value in vars.iteritems():
+        for key, value in iteritems(vars):
             value, error = self[key].validate(value)
             if error:
                 errors[key] = error
@@ -437,13 +415,22 @@ class Table(Serializable):
     def _create_references(self):
         db = self._db
         pr = db._pending_references
+        self._referenced_by_list = []
         self._referenced_by = []
         self._references = []
         for field in self:
             #fieldname = field.name ##FIXME not used ?
             field_type = field.type
-            if isinstance(field_type, str) and field_type[:10] == 'reference ':
-                ref = field_type[10:].strip()
+            if isinstance(field_type, str) and (
+                    field_type.startswith('reference ') or
+                    field_type.startswith('list:reference ')):
+
+                is_list = field_type[:15] == 'list:reference '
+                if is_list:
+                    ref = field_type[15:].strip()
+                else:
+                    ref = field_type[10:].strip()
+
                 if not ref:
                     SyntaxError('Table: reference to nothing: %s' % ref)
                 if '.' in ref:
@@ -466,7 +453,10 @@ class Table(Serializable):
                     rfield = rtable[rfieldname]
                 else:
                     rfield = rtable._id
-                rtable._referenced_by.append(field)
+                if is_list:
+                    rtable._referenced_by_list.append(field)
+                else:
+                    rtable._referenced_by.append(field)
                 field.referent = rfield
                 self._references.append(field)
             else:
@@ -474,16 +464,19 @@ class Table(Serializable):
         if self._tablename in pr:
             referees = pr.pop(self._tablename)
             for referee in referees:
-                self._referenced_by.append(referee)
+                if referee.type.startswith('list:reference '):
+                    self._referenced_by_list.append(referee)
+                else:
+                    self._referenced_by.append(referee)
 
     def _filter_fields(self, record, id=False):
-        return dict([(k, v) for (k, v) in record.iteritems() if k
+        return dict([(k, v) for (k, v) in iteritems(record) if k
                      in self.fields and (self[k].type!='id' or id)])
 
     def _build_query(self,key):
         """ for keyed table only """
         query = None
-        for k,v in key.iteritems():
+        for k,v in iteritems(key):
             if k in self._primarykey:
                 if query:
                     query = query & (self[k] == v)
@@ -518,7 +511,10 @@ class Table(Serializable):
                     orderby_on_limitby=False
                 ).first()
             else:
-                return ogetattr(self, str(key))
+                try:
+                    return getattr(self, key)
+                except:
+                    raise KeyError(key)
 
     def __call__(self, key=DEFAULT, **kwargs):
         for_update = kwargs.get('_for_update', False)
@@ -545,11 +541,11 @@ class Table(Serializable):
                     orderby=orderby,
                     orderby_on_limitby=False).first()
             if record:
-                for k,v in kwargs.iteritems():
+                for k,v in iteritems(kwargs):
                     if record[k]!=v: return None
             return record
         elif kwargs:
-            query = reduce(lambda a,b:a&b,[self[k]==v for k,v in kwargs.iteritems()])
+            query = reduce(lambda a,b:a&b,[self[k]==v for k,v in iteritems(kwargs)])
             return self._db(query).select(limitby=(0,1),for_update=for_update, orderby=orderby, orderby_on_limitby=False).first()
         else:
             return None
@@ -579,14 +575,19 @@ class Table(Serializable):
             if isinstance(key, dict):
                 raise SyntaxError(
                     'value must be a dictionary: %s' % value)
-            osetattr(self, str(key), value)
-
-    __getattr__ = __getitem__
+            self.__dict__[str(key)] = value
+            if isinstance(value, (FieldVirtual, FieldMethod)):
+                if value.name == 'unknown':
+                    value.name = str(key)
+                if isinstance(value, FieldVirtual):
+                    self._virtual_fields.append(value)
+                else:
+                    self._virtual_methods.append(value)
 
     def __setattr__(self, key, value):
-        if key[:1]!='_' and key in self:
+        if key[:1] != '_' and key in self:
             raise SyntaxError('Object exists and cannot be redefined: %s' % key)
-        osetattr(self,key,value)
+        self[key] = value
 
     def __delitem__(self, key):
         if isinstance(key, dict):
@@ -597,20 +598,9 @@ class Table(Serializable):
                 not self._db(self._id == key).delete():
             raise SyntaxError('No such record: %s' % key)
 
-    def __contains__(self,key):
-        return hasattr(self, key)
-
-    has_key = __contains__
-
-    def items(self):
-        return self.__dict__.items()
-
     def __iter__(self):
         for fieldname in self.fields:
             yield self[fieldname]
-
-    def iteritems(self):
-        return self.__dict__.iteritems()
 
     def __repr__(self):
         return '<Table %s (%s)>' % (self._tablename, ','.join(self.fields()))
@@ -644,7 +634,7 @@ class Table(Serializable):
     def drop(self, mode=''):
         return self._db._adapter.drop(self,mode)
 
-    def _listify(self,fields,update=False):
+    def _listify(self, fields, update=False):
         new_fields = {}  # format: new_fields[name] = (field,value)
 
         # store all fields passed as input in new_fields
@@ -694,7 +684,10 @@ class Table(Serializable):
                     # error silently unless field is required!
                     if ofield.required:
                         raise SyntaxError('unable to compute field: %s' % name)
-        return new_fields.values()
+                    elif ofield.default is not None:
+                        row[name] = new_value = ofield.default
+                        new_fields[name] = (ofield, new_value)
+        return list(new_fields.values())
 
     def _attempt_upload(self, fields):
         for field in self:
@@ -705,7 +698,7 @@ class Table(Serializable):
                         new_name = field.store(value.file, filename=value.filename)
                     elif isinstance(value,dict):
                         if 'data' in value and 'filename' in value:
-                            stream = StringIO.StringIO(value['data'])
+                            stream = StringIO(value['data'])
                             new_name = field.store(stream, filename=value['filename'])
                         else:
                             new_name = None
@@ -721,7 +714,7 @@ class Table(Serializable):
         for field in self:
              if (not field.name in fields and
                  field.type != "id" and
-                 field.compute is not None and
+                 field.compute is None and
                  field.default is not None):
                  fields[field.name] = field.default
         return fields
@@ -733,62 +726,58 @@ class Table(Serializable):
     def insert(self, **fields):
         fields = self._defaults(fields)
         self._attempt_upload(fields)
-        if any(f(fields) for f in self._before_insert): return 0
-        ret =  self._db._adapter.insert(self, self._listify(fields))
+        if any(f(fields) for f in self._before_insert):
+            return 0
+        ret = self._db._adapter.insert(self, self._listify(fields))
         if ret and self._after_insert:
             fields = Row(fields)
-            [f(fields,ret) for f in self._after_insert]
+            [f(fields, ret) for f in self._after_insert]
         return ret
 
-    def validate_and_insert(self, **fields):
+    def _validate_fields(self, fields, defattr='default'):
         response = Row()
-        response.errors = Row()
+        response.id, response.errors = None, Row()
         new_fields = copy.copy(fields)
-        for key,value in fields.iteritems():
-            value,error = self[key].validate(value)
+        for fieldname in self.fields:
+            default = getattr(self[fieldname], defattr)
+            if callable(default):
+                default = default()
+            raw_value = fields.get(fieldname, default)
+            value, error = self[fieldname].validate(raw_value)
             if error:
-                response.errors[key] = "%s" % error
-            else:
-                new_fields[key] = value
+                response.errors[fieldname] = "%s" % error
+            elif value is not None:
+                new_fields[fieldname] = value
+        return response, new_fields
+
+    def validate_and_insert(self, **fields):
+        response, new_fields = self._validate_fields(fields)
         if not response.errors:
             response.id = self.insert(**new_fields)
-        else:
-            response.id = None
         return response
 
     def validate_and_update(self, _key=DEFAULT, **fields):
-        response = Row()
-        response.errors = Row()
-        new_fields = copy.copy(fields)
-
-        for key, value in fields.iteritems():
-            value, error = self[key].validate(value)
-            if error:
-                response.errors[key] = "%s" % error
-            else:
-                new_fields[key] = value
-
+        response, new_fields = self._validate_fields(fields, 'update')
+        #: select record(s) for update
         if _key is DEFAULT:
             record = self(**fields)
         elif isinstance(_key, dict):
             record = self(**_key)
         else:
             record = self(_key)
-
+        #: do the update
         if not response.errors and record:
             if '_id' in self:
                 myset = self._db(self._id == record[self._id.name])
             else:
                 query = None
-                for key, value in _key.iteritems():
+                for key, value in iteritems(_key):
                     if query is None:
                         query = getattr(self, key) == value
                     else:
                         query = query & (getattr(self, key) == value)
                 myset = self._db(query)
-            response.id = myset.update(**fields)
-        else:
-            response.id = None
+            response.id = myset.update(**new_fields)
         return response
 
     def update_or_insert(self, _key=DEFAULT, **values):
@@ -808,7 +797,7 @@ class Table(Serializable):
     def validate_and_update_or_insert(self, _key=DEFAULT, **fields):
         if _key is DEFAULT or _key == '':
             primary_keys = {}
-            for key, value in fields.iteritems():
+            for key, value in iteritems(fields):
                 if key in self._primarykey:
                     primary_keys[key] = value
             if primary_keys != {}:
@@ -816,7 +805,7 @@ class Table(Serializable):
                 _key = primary_keys
             else:
                 required_keys = {}
-                for key, value in fields.iteritems():
+                for key, value in iteritems(fields):
                     if getattr(self, key).required:
                         required_keys[key] = value
                 record = self(**required_keys)
@@ -841,9 +830,9 @@ class Table(Serializable):
         """
         here items is a list of dictionaries
         """
-        items = [self._listify(item) for item in items]
+        listify_items = [self._listify(item) for item in items]
         if any(f(item) for item in items for f in self._before_insert):return 0
-        ret = self._db._adapter.bulk_insert(self,items)
+        ret = self._db._adapter.bulk_insert(self, listify_items)
         ret and [[f(item,ret[k]) for k,item in enumerate(items)] for f in self._after_insert]
         return ret
 
@@ -1118,8 +1107,8 @@ class Expression(object):
 
     def __getitem__(self, i):
         if isinstance(i, slice):
-            start = i.start
-            stop   = i.stop
+            start = i.start or 0
+            stop  = i.stop
 
             db = self.db
             if start < 0:
@@ -1127,7 +1116,8 @@ class Expression(object):
             else:
                 pos0 = start + 1
 
-            if stop == None or stop == sys.maxint:
+            maxint = sys.maxint if PY2 else sys.maxsize
+            if stop is None or stop == maxint:
                 length = self.len()
             elif stop < 0:
                 length = '(%s - %d - %s)' % (self.len(), abs(stop) - 1, pos0)
@@ -1140,7 +1130,7 @@ class Expression(object):
             return self[i:i + 1]
 
     def __str__(self):
-        return self.db._adapter.expand(self, self.type)
+        return str(self.db._adapter.expand(self, self.type))
 
     def __or__(self, other):  # for use in sortby
         db = self.db
@@ -1176,6 +1166,9 @@ class Expression(object):
         db = self.db
         return Expression(db,db._adapter.DIV,self,other,self.type)
 
+    def __truediv__(self, other):
+        return self.__div__(other)
+
     def __mod__(self, other):
         db = self.db
         return Expression(db,db._adapter.MOD,self,other,self.type)
@@ -1204,13 +1197,13 @@ class Expression(object):
         db = self.db
         return Query(db, db._adapter.GE, self, value)
 
-    def like(self, value, case_sensitive=True):
+    def like(self, value, case_sensitive=True, escape=None):
         db = self.db
         op = case_sensitive and db._adapter.LIKE or db._adapter.ILIKE
-        return Query(db, op, self, value)
+        return Query(db, op, self, value, escape=escape)
 
-    def ilike(self, value):
-        return self.like(value, case_sensitive=False)
+    def ilike(self, value, escape=None):
+        return self.like(value, case_sensitive=False, escape=escape)
 
     def regexp(self, value):
         db = self.db
@@ -1259,7 +1252,7 @@ class Expression(object):
 
     def contains(self, value, all=False, case_sensitive=False):
         """
-        For MongoDB and GAE contains is always case sensitive
+        For GAE contains() is always case sensitive
         """
         db = self.db
         if isinstance(value,(list, tuple)):
@@ -1365,6 +1358,7 @@ class FieldMethod(object):
         self.handler = handler
 
 
+@implements_bool
 class Field(Expression, Serializable):
 
     Virtual = FieldVirtual
@@ -1438,15 +1432,16 @@ class Field(Expression, Serializable):
         self.op = None
         self.first = None
         self.second = None
-        if isinstance(fieldname, unicode):
+        if PY2 and isinstance(fieldname, unicode):
             try:
                 fieldname = str(fieldname)
             except UnicodeEncodeError:
                 raise SyntaxError('Field: invalid unicode field name')
         self.name = fieldname = cleanup(fieldname)
-        if not isinstance(fieldname, str) or hasattr(Table, fieldname) or \
-                fieldname[0] == '_' or '.' in fieldname or \
-                REGEX_PYTHON_KEYWORDS.match(fieldname):
+        if (not isinstance(fieldname, str) or hasattr(Table, fieldname)
+            or not REGEX_VALID_TB_FLD.match(fieldname)
+            or REGEX_PYTHON_KEYWORDS.match(fieldname)
+            ):
             raise SyntaxError('Field: invalid field name: %s, '
                               'use rname for "funny" names' % fieldname)
 
@@ -1571,12 +1566,12 @@ class Field(Expression, Serializable):
         file_properties = self.retrieve_file_properties(name, path)
         filename = file_properties['filename']
         if isinstance(self_uploadfield, str):  # ## if file is in DB
-            stream = StringIO.StringIO(row[self_uploadfield] or '')
+            stream = StringIO(row[self_uploadfield] or '')
         elif isinstance(self_uploadfield, Field):
             blob_uploadfield_name = self_uploadfield.uploadfield
             query = self_uploadfield == name
             data = self_uploadfield.table(query)[blob_uploadfield_name]
-            stream = StringIO.StringIO(data)
+            stream = StringIO(data)
         elif self.uploadfs:
             # ## if file is on pyfilesystem
             stream = self.uploadfs.open(name, 'rb')
@@ -1690,7 +1685,7 @@ class Field(Expression, Serializable):
             d["fieldname"] = d.pop("name")
         return d
 
-    def __nonzero__(self):
+    def __bool__(self):
         return True
 
     def __str__(self):
@@ -1814,7 +1809,7 @@ class Query(Serializable):
                     elif isinstance(v, (datetime.date,
                                         datetime.time,
                                         datetime.datetime)):
-                        newd[k] = unicode(v)
+                        newd[k] = unicode(v) if PY2 else str(v)
                 elif k == "op":
                     if callable(v):
                         newd[k] = v.__name__
@@ -1878,20 +1873,24 @@ class Set(Serializable):
         return '<Set %s>' % BaseAdapter.expand(self.db._adapter,self.query)
 
     def __call__(self, query, ignore_common_filters=False):
+        return self.where(query, ignore_common_filters)
+
+    def where(self, query, ignore_common_filters=False):
         if query is None:
             return self
-        elif isinstance(query,Table):
+        elif isinstance(query, Table):
             query = self.db._adapter.id_query(query)
-        elif isinstance(query,str):
-            query = Expression(self.db,query)
-        elif isinstance(query,Field):
-            query = query!=None
+        elif isinstance(query, str):
+            query = Expression(self.db, query)
+        elif isinstance(query, Field):
+            query = query != None
         if self.query:
             return Set(self.db, self.query & query,
                        ignore_common_filters=ignore_common_filters)
         else:
             return Set(self.db, query,
                        ignore_common_filters=ignore_common_filters)
+
 
     def _count(self,distinct=None):
         return self.db._adapter._count(self.query,distinct)
@@ -2025,6 +2024,16 @@ class Set(Serializable):
         fields = adapter.expand_all(fields, tablenames)
         return adapter.select(self.query,fields,attributes)
 
+    def iterselect(self, *fields, **attributes):
+        adapter = self.db._adapter
+        tablenames = adapter.tables(self.query,
+                                    attributes.get('join',None),
+                                    attributes.get('left',None),
+                                    attributes.get('orderby',None),
+                                    attributes.get('groupby',None))
+        fields = adapter.expand_all(fields, tablenames)
+        return adapter.iterselect(self.query,fields,attributes)
+
     def nested_select(self,*fields,**attributes):
         return Expression(self.db,self._select(*fields,**attributes))
 
@@ -2068,7 +2077,7 @@ class Set(Serializable):
         response = Row()
         response.errors = Row()
         new_fields = copy.copy(update_fields)
-        for key,value in update_fields.iteritems():
+        for key,value in iteritems(update_fields):
             value,error = self.db[tablename][key].validate(value)
             if error:
                 response.errors[key] = '%s' % error
@@ -2093,7 +2102,9 @@ class Set(Serializable):
         table = self.db[self.db._adapter.tables(self.query)[0]]
         # ## mind uploadfield==True means file is not in DB
         if upload_fields:
-            fields = upload_fields.keys()
+            fields = list(upload_fields)
+            # Explicity add compute upload fields (ex: thumbnail)
+            fields += [f for f in table.fields if table[f].compute is not None]
         else:
             fields = table.fields
         fields = [f for f in fields if table[f].type == 'upload'
@@ -2107,7 +2118,8 @@ class Set(Serializable):
                 oldname = record.get(fieldname, None)
                 if not oldname:
                     continue
-                if upload_fields and oldname == upload_fields[fieldname]:
+                if (upload_fields and fieldname in upload_fields and
+                    oldname == upload_fields[fieldname]):
                     continue
                 if field.custom_delete:
                     field.custom_delete(oldname)
@@ -2131,6 +2143,7 @@ class Set(Serializable):
 class LazyReferenceGetter(object):
     def __init__(self, table, id):
         self.db, self.tablename, self.id = table._db, table._tablename, id
+
     def __call__(self, other_tablename):
         if self.db._lazy_tables is False:
             raise AttributeError()
@@ -2146,37 +2159,56 @@ class LazySet(object):
     def __init__(self, field, id):
         self.db, self.tablename, self.fieldname, self.id = \
             field.db, field._tablename, field.name, id
+
     def _getset(self):
-        query = self.db[self.tablename][self.fieldname]==self.id
-        return Set(self.db,query)
+        query = self.db[self.tablename][self.fieldname] == self.id
+        return Set(self.db, query)
+
     def __repr__(self):
         return repr(self._getset())
+
     def __call__(self, query, ignore_common_filters=False):
+        return self.where(query, ignore_common_filters)
+
+    def where(self, query, ignore_common_filters=False):
         return self._getset()(query, ignore_common_filters)
-    def _count(self,distinct=None):
+
+    def _count(self, distinct=None):
         return self._getset()._count(distinct)
+
     def _select(self, *fields, **attributes):
-        return self._getset()._select(*fields,**attributes)
+        return self._getset()._select(*fields, **attributes)
+
     def _delete(self):
         return self._getset()._delete()
+
     def _update(self, **update_fields):
         return self._getset()._update(**update_fields)
+
     def isempty(self):
         return self._getset().isempty()
-    def count(self,distinct=None, cache=None):
-        return self._getset().count(distinct,cache)
+
+    def count(self, distinct=None, cache=None):
+        return self._getset().count(distinct, cache)
+
     def select(self, *fields, **attributes):
-        return self._getset().select(*fields,**attributes)
-    def nested_select(self,*fields,**attributes):
-        return self._getset().nested_select(*fields,**attributes)
+        return self._getset().select(*fields, **attributes)
+
+    def nested_select(self, *fields, **attributes):
+        return self._getset().nested_select(*fields, **attributes)
+
     def delete(self):
         return self._getset().delete()
+
     def update(self, **update_fields):
         return self._getset().update(**update_fields)
+
     def update_naive(self, **update_fields):
         return self._getset().update_naive(**update_fields)
+
     def validate_and_update(self, **update_fields):
         return self._getset().validate_and_update(**update_fields)
+
     def delete_uploaded_files(self, upload_fields=None):
         return self._getset().delete_uploaded_files(upload_fields)
 
@@ -2189,8 +2221,247 @@ class VirtualCommand(object):
         return self.method(self.row,*args,**kwargs)
 
 
-class Rows(object):
+@implements_bool
+class BasicRows(object):
+    """
+    Abstract class for Rows and IterRows
+    """
+    def __bool__(self):
+        return True if self.first() is not None else False
 
+    def __str__(self):
+        """
+        Serializes the table into a csv file
+        """
+
+        s = StringIO()
+        self.export_to_csv_file(s)
+        return s.getvalue()
+
+    def as_trees(self, parent_name='parent_id', children_name='children',
+                 render=False):
+        """
+        returns the data as list of trees.
+
+        :param parent_name: the name of the field holding the reference to the
+                            parent (default parent_id).
+        :param children_name: the name where the children of each row will be
+                              stored as a list (default children).
+        :param render: whether we will render the fields using their represent
+                       (default False) can be a list of fields to render or
+                       True to render all.
+        """
+        roots = []
+        drows = {}
+        rows = list(self.render(fields=None if render is True else render)) \
+            if render else self
+        for row in rows:
+            drows[row.id] = row
+            row[children_name] = []
+        for row in rows:
+            parent = row[parent_name]
+            if parent is None:
+                roots.append(row)
+            else:
+                drows[parent][children_name].append(row)
+        return roots
+
+    def as_list(self,
+                compact=True,
+                storage_to_dict=True,
+                datetime_to_str=False,
+                custom_types=None):
+        """
+        Returns the data as a list or dictionary.
+
+        Args:
+            storage_to_dict: when True returns a dict, otherwise a list
+            datetime_to_str: convert datetime fields as strings
+        """
+        (oc, self.compact) = (self.compact, compact)
+        if storage_to_dict:
+            items = [item.as_dict(datetime_to_str, custom_types)
+                     for item in self]
+        else:
+            items = [item for item in self]
+        self.compact = oc
+        return items
+
+    def as_dict(self,
+                key='id',
+                compact=True,
+                storage_to_dict=True,
+                datetime_to_str=False,
+                custom_types=None):
+        """
+        Returns the data as a dictionary of dictionaries (storage_to_dict=True)
+        or records (False)
+
+        Args:
+            key: the name of the field to be used as dict key, normally the id
+            compact: ? (default True)
+            storage_to_dict: when True returns a dict, otherwise a list(default True)
+            datetime_to_str: convert datetime fields as strings (default False)
+        """
+
+        # test for multiple rows
+        multi = False
+        f = self.first()
+        if f and isinstance(key, basestring):
+            multi = any([isinstance(v, f.__class__) for v in f.values()])
+            if ("." not in key) and multi:
+                # No key provided, default to int indices
+                def new_key():
+                    i = 0
+                    while True:
+                        yield i
+                        i += 1
+                key_generator = new_key()
+                key = lambda r: key_generator.next()
+
+        rows = self.as_list(compact, storage_to_dict, datetime_to_str,
+                            custom_types)
+        if isinstance(key, str) and key.count('.') == 1:
+            (table, field) = key.split('.')
+            return dict([(r[table][field], r) for r in rows])
+        elif isinstance(key, str):
+            return dict([(r[key], r) for r in rows])
+        else:
+            return dict([(key(r), r) for r in rows])
+
+    def xml(self, strict=False, row_name='row', rows_name='rows'):
+        """
+        Serializes the table using sqlhtml.SQLTABLE (if present)
+        """
+        if not strict and not self.db.has_representer('rows_xml'):
+            strict = True
+
+        if strict:
+            return '<%s>\n%s\n</%s>' % (
+                rows_name,
+                '\n'.join(
+                    row.as_xml(
+                        row_name=row_name,
+                        colnames=self.colnames
+                    ) for row in self),
+                rows_name
+            )
+
+        rv = self.db.represent('rows_xml', self)
+        if hasattr(rv, 'xml') and callable(getattr(rv, 'xml')):
+            return rv.xml()
+        return rv
+
+    def as_xml(self, row_name='row', rows_name='rows'):
+        return self.xml(strict=True, row_name=row_name, rows_name=rows_name)
+
+    def as_json(self, mode='object', default=None):
+        """
+        Serializes the rows to a JSON list or object with objects
+        mode='object' is not implemented (should return a nested
+        object structure)
+        """
+        items = [record.as_json(
+                    mode=mode, default=default, serialize=False,
+                    colnames=self.colnames
+                ) for record in self]
+
+        return serializers.json(items)
+
+    def export_to_csv_file(self, ofile, null='<NULL>', *args, **kwargs):
+        """
+        Exports data to csv, the first line contains the column names
+
+        Args:
+            ofile: where the csv must be exported to
+            null: how null values must be represented (default '<NULL>')
+            delimiter: delimiter to separate values (default ',')
+            quotechar: character to use to quote string values (default '"')
+            quoting: quote system, use csv.QUOTE_*** (default csv.QUOTE_MINIMAL)
+            represent: use the fields .represent value (default False)
+            colnames: list of column names to use (default self.colnames)
+
+        This will only work when exporting rows objects!!!!
+        DO NOT use this with db.export_to_csv()
+        """
+        delimiter = kwargs.get('delimiter', ',')
+        quotechar = kwargs.get('quotechar', '"')
+        quoting = kwargs.get('quoting', csv.QUOTE_MINIMAL)
+        represent = kwargs.get('represent', False)
+        writer = csv.writer(ofile, delimiter=delimiter,
+                            quotechar=quotechar, quoting=quoting)
+
+        def unquote_colnames(colnames):
+            unq_colnames = []
+            for col in colnames:
+                m = self.db._adapter.REGEX_TABLE_DOT_FIELD.match(col)
+                if not m:
+                    unq_colnames.append(col)
+                else:
+                    unq_colnames.append('.'.join(m.groups()))
+            return unq_colnames
+
+        colnames = kwargs.get('colnames', self.colnames)
+        write_colnames = kwargs.get('write_colnames', True)
+        # a proper csv starting with the column names
+        if write_colnames:
+            writer.writerow(unquote_colnames(colnames))
+
+        def none_exception(value):
+            """
+            Returns a cleaned up value that can be used for csv export:
+
+            - unicode text is encoded as such
+            - None values are replaced with the given representation (default <NULL>)
+            """
+            if value is None:
+                return null
+            elif PY2 and isinstance(value, unicode):
+                return value.encode('utf8')
+            elif isinstance(value, Reference):
+                return long(value)
+            elif hasattr(value, 'isoformat'):
+                return value.isoformat()[:19].replace('T', ' ')
+            elif isinstance(value, (list, tuple)):  # for type='list:..'
+                return bar_encode(value)
+            return value
+
+        repr_cache = {}
+        for record in self:
+            row = []
+            for col in colnames:
+                m = self.db._adapter.REGEX_TABLE_DOT_FIELD.match(col)
+                if not m:
+                    row.append(record._extra[col])
+                else:
+                    (t, f) = m.groups()
+                    field = self.db[t][f]
+                    if isinstance(record.get(t, None), (Row, dict)):
+                        value = record[t][f]
+                    else:
+                        value = record[f]
+                    if field.type == 'blob' and value is not None:
+                        value = base64.b64encode(value)
+                    elif represent and field.represent:
+                        if field.type.startswith('reference'):
+                            if field not in repr_cache:
+                                repr_cache[field] = {}
+                            if value not in repr_cache[field]:
+                                repr_cache[field][value] = field.represent(
+                                    value, record
+                                )
+                            value = repr_cache[field][value]
+                        else:
+                            value = field.represent(value, record)
+                    row.append(none_exception(value))
+            writer.writerow(row)
+
+    # for consistent naming yet backwards compatible
+    as_csv = __str__
+    json = as_json
+
+
+class Rows(BasicRows):
     """
     A wrapper for the return value of a select. It basically represents a table.
     It has an iterator and each row is represented as a `Row` dictionary.
@@ -2198,14 +2469,8 @@ class Rows(object):
 
     # ## TODO: this class still needs some work to care for ID/OID
 
-    def __init__(
-        self,
-        db=None,
-        records=[],
-        colnames=[],
-        compact=True,
-        rawrows=None
-        ):
+    def __init__(self, db=None, records=[], colnames=[], compact=True,
+                 rawrows=None):
         self.db = db
         self.records = records
         self.colnames = colnames
@@ -2215,7 +2480,7 @@ class Rows(object):
     def __repr__(self):
         return '<Rows (%s)>' % len(self.records)
 
-    def setvirtualfields(self,**keyed_virtualfields):
+    def setvirtualfields(self, **keyed_virtualfields):
         """
         For reference::
 
@@ -2239,57 +2504,53 @@ class Rows(object):
         if not keyed_virtualfields:
             return self
         for row in self.records:
-            for (tablename,virtualfields) in keyed_virtualfields.iteritems():
+            for (tablename, virtualfields) in iteritems(keyed_virtualfields):
                 attributes = dir(virtualfields)
-                if not tablename in row:
+                if tablename not in row:
                     box = row[tablename] = Row()
                 else:
                     box = row[tablename]
                 updated = False
                 for attribute in attributes:
                     if attribute[0] != '_':
-                        method = getattr(virtualfields,attribute)
-                        if hasattr(method,'__lazy__'):
-                            box[attribute]=VirtualCommand(method,row)
-                        elif type(method)==types.MethodType:
+                        method = getattr(virtualfields, attribute)
+                        if hasattr(method, '__lazy__'):
+                            box[attribute] = VirtualCommand(method, row)
+                        elif type(method) == types.MethodType:
                             if not updated:
                                 virtualfields.__dict__.update(row)
                                 updated = True
-                            box[attribute]=method()
+                            box[attribute] = method()
         return self
 
-    def __and__(self,other):
-        if self.colnames!=other.colnames:
+    def __and__(self, other):
+        if self.colnames != other.colnames:
             raise Exception('Cannot & incompatible Rows objects')
         records = self.records+other.records
-        return Rows(self.db,records,self.colnames,
+        return Rows(self.db, records, self.colnames,
                     compact=self.compact or other.compact)
 
-    def __or__(self,other):
-        if self.colnames!=other.colnames:
+    def __or__(self, other):
+        if self.colnames != other.colnames:
             raise Exception('Cannot | incompatible Rows objects')
         records = [record for record in other.records
-                   if not record in self.records]
+                   if record not in self.records]
         records = self.records + records
-        return Rows(self.db,records,self.colnames,
+        return Rows(self.db, records, self.colnames,
                     compact=self.compact or other.compact)
-
-    def __nonzero__(self):
-        if len(self.records):
-            return 1
-        return 0
 
     def __len__(self):
         return len(self.records)
 
     def __getslice__(self, a, b):
-        return Rows(self.db,self.records[a:b],self.colnames,compact=self.compact)
+        return Rows(self.db, self.records[a:b], self.colnames,
+                    compact=self.compact)
 
     def __getitem__(self, i):
         row = self.records[i]
-        keys = row.keys()
+        keys = list(row.keys())
         if self.compact and len(keys) == 1 and keys[0] != '_extra':
-            return row[row.keys()[0]]
+            return row[keys[0]]
         return row
 
     def __iter__(self):
@@ -2300,14 +2561,11 @@ class Rows(object):
         for i in xrange(len(self)):
             yield self[i]
 
-    def __str__(self):
-        """
-        Serializes the table into a csv file
-        """
-
-        s = StringIO.StringIO()
-        self.export_to_csv_file(s)
-        return s.getvalue()
+    def __eq__(self, other):
+        if isinstance(other, Rows):
+            return (self.records == other.records)
+        else:
+            return False
 
     def column(self, column=None):
         return [r[str(column) if column else self.colnames[0]] for r in self]
@@ -2322,7 +2580,7 @@ class Rows(object):
             return None
         return self[-1]
 
-    def find(self,f,limitby=None):
+    def find(self, f, limitby=None):
         """
         Returns a new Rows object, a subset of the original object,
         filtered by the function `f`
@@ -2331,15 +2589,17 @@ class Rows(object):
             return Rows(self.db, [], self.colnames, compact=self.compact)
         records = []
         if limitby:
-            a,b = limitby
+            a, b = limitby
         else:
-            a,b = 0,len(self)
+            a, b = 0, len(self)
         k = 0
         for i, row in enumerate(self):
             if f(row):
-                if a<=k: records.append(self.records[i])
+                if a <= k:
+                    records.append(self.records[i])
                 k += 1
-                if k==b: break
+                if k == b:
+                    break
         return Rows(self.db, records, self.colnames, compact=self.compact)
 
     def exclude(self, f):
@@ -2350,8 +2610,8 @@ class Rows(object):
         if not self.records:
             return Rows(self.db, [], self.colnames, compact=self.compact)
         removed = []
-        i=0
-        while i<len(self):
+        i = 0
+        while i < len(self):
             row = self[i]
             if f(row):
                 removed.append(self.records[i])
@@ -2396,7 +2656,7 @@ class Rows(object):
             if value not in groups:
                 groups[value] = build_fields_struct(row, fields, num+1, {})
             else:
-                struct = build_fields_struct(row, fields, num+1, groups[ value ])
+                struct = build_fields_struct(row, fields, num+1, groups[value])
 
                 # still have more grouping to do
                 if type(struct) == type(dict()):
@@ -2442,7 +2702,7 @@ class Rows(object):
             raise RuntimeError("Rows.render() needs a `rows_render` \
                                representer in DAL instance")
         row = copy.deepcopy(self.records[i])
-        keys = row.keys()
+        keys = list(row.keys())
         tables = [f.tablename for f in fields] if fields \
             else [k for k in keys if k != '_extra']
         for table in tables:
@@ -2455,217 +2715,104 @@ class Rows(object):
                 row[table][field] = self.db.represent(
                     'rows_render', self.db[table][field], row[table][field],
                     row[table])
+
         if self.compact and len(keys) == 1 and keys[0] != '_extra':
             return row[keys[0]]
         return row
 
-    def as_list(self,
-                compact=True,
-                storage_to_dict=True,
-                datetime_to_str=False,
-                custom_types=None):
-        """
-        Returns the data as a list or dictionary.
 
-        Args:
-            storage_to_dict: when True returns a dict, otherwise a list
-            datetime_to_str: convert datetime fields as strings
-        """
-        (oc, self.compact) = (self.compact, compact)
-        if storage_to_dict:
-            items = [item.as_dict(datetime_to_str, custom_types) for item in self]
-        else:
-            items = [item for item in self]
-        self.compact = oc
-        return items
+@implements_iterator
+class IterRows(BasicRows):
+    def __init__(self, db, sql, fields, colnames, blob_decode, cacheable):
+        self.db = db
+        self.fields = fields
+        self.colnames = colnames
+        self.blob_decode = blob_decode
+        self.cacheable = cacheable
+        (self.fields_virtual, self.fields_lazy, self.tmps) = \
+            self.db._adapter._parse_expand_colnames(colnames)
+        self.db._adapter.execute(sql)
+        self.db._adapter.current_cursor_in_use = True
+        self.cursor = self.db._adapter.cursor
+        self._head = None
+        self.last_item = None
+        self.last_item_id = None
+        self.compact = True
+        self.sql = sql
 
-    def as_dict(self,
-                key='id',
-                compact=True,
-                storage_to_dict=True,
-                datetime_to_str=False,
-                custom_types=None):
-        """
-        Returns the data as a dictionary of dictionaries (storage_to_dict=True)
-        or records (False)
+    def __next__(self):
+        db_row = self.cursor.fetchone()
+        if db_row is None:
+            raise StopIteration
+        row = self.db._adapter._parse(db_row, self.tmps, self.fields,
+                                      self.colnames, self.blob_decode,
+                                      self.cacheable, self.fields_virtual,
+                                      self.fields_lazy)
+        if self.compact:
+            # The following is to translate
+            # <Row {'t0': {'id': 1L, 'name': 'web2py'}}>
+            # in
+            # <Row {'id': 1L, 'name': 'web2py'}>
+            # normally accomplished by Rows.__get_item__
+            keys = list(row.keys())
+            if len(keys) == 1 and keys[0] != '_extra':
+                row = row[keys[0]]
+        return row
 
-        Args:
-            key: the name of the field to be used as dict key, normally the id
-            compact: ? (default True)
-            storage_to_dict: when True returns a dict, otherwise a list(default True)
-            datetime_to_str: convert datetime fields as strings (default False)
-        """
-
-        # test for multiple rows
-        multi = False
-        f = self.first()
-        if f and isinstance(key, basestring):
-            multi = any([isinstance(v, f.__class__) for v in f.values()])
-            if (not "." in key) and multi:
-                # No key provided, default to int indices
-                def new_key():
-                    i = 0
-                    while True:
-                        yield i
-                        i += 1
-                key_generator = new_key()
-                key = lambda r: key_generator.next()
-
-        rows = self.as_list(compact, storage_to_dict, datetime_to_str, custom_types)
-        if isinstance(key,str) and key.count('.')==1:
-            (table, field) = key.split('.')
-            return dict([(r[table][field],r) for r in rows])
-        elif isinstance(key,str):
-            return dict([(r[key],r) for r in rows])
-        else:
-            return dict([(key(r),r) for r in rows])
-
-    def as_trees(self, parent_name='parent_id', children_name='children', render=False):
-        """
-        returns the data as list of trees.
-
-        :param parent_name: the name of the field holding the reference to the
-                            parent (default parent_id).
-        :param children_name: the name where the children of each row will be
-                              stored as a list (default children).
-        :param render: whether we will render the fields using their represent
-                       (default False) can be a list of fields to render or
-                       True to render all.
-        """
-        roots = []
-        drows = {}
-        rows = list(self.render(fields=None if render is True else render)) if render else self
-        for row in rows:
-            drows[row.id] = row
-            row[children_name] = []
-        for row in rows:
-            parent = row[parent_name]
-            if parent is None:
-                roots.append(row)
+    def __iter__(self):
+        if self._head:
+            yield self._head
+        try:
+            row = next(self)
+            while row is not None:
+                yield row
+                row = next(self)
+        except StopIteration:
+            # Iterator is over, adjust the cursor logic
+            if self.db._adapter.current_cursor_in_use == True:
+                # nothing to do, current_cursor_in_use is still True
+                self.db._adapter.current_cursor_in_use = False
             else:
-                drows[parent][children_name].append(row)
-        return roots
+                # A sub query has opened a new cursor. Close the one in use, pop the former one from stack
+                self.db._adapter.cursor.close()
+                self.db._adapter.cursor = self.db._adapter.cursors_in_use.pop()
+            raise StopIteration
+        return
 
-    def export_to_csv_file(self, ofile, null='<NULL>', *args, **kwargs):
-        """
-        Exports data to csv, the first line contains the column names
+    def first(self):
+        if self._head is None:
+            try:
+                self._head = next(self)
+            except StopIteration:
+                # TODO should I raise something?
+                return None
+        return self._head
 
-        Args:
-            ofile: where the csv must be exported to
-            null: how null values must be represented (default '<NULL>')
-            delimiter: delimiter to separate values (default ',')
-            quotechar: character to use to quote string values (default '"')
-            quoting: quote system, use csv.QUOTE_*** (default csv.QUOTE_MINIMAL)
-            represent: use the fields .represent value (default False)
-            colnames: list of column names to use (default self.colnames)
+    def __getitem__(self, key):
+        if not isinstance(key, (int, long)):
+            raise TypeError
 
-        This will only work when exporting rows objects!!!!
-        DO NOT use this with db.export_to_csv()
-        """
-        delimiter = kwargs.get('delimiter', ',')
-        quotechar = kwargs.get('quotechar', '"')
-        quoting = kwargs.get('quoting', csv.QUOTE_MINIMAL)
-        represent = kwargs.get('represent', False)
-        writer = csv.writer(ofile, delimiter=delimiter,
-                            quotechar=quotechar, quoting=quoting)
+        if key == self.last_item_id:
+            return self.last_item
 
-        def unquote_colnames(colnames):
-            unq_colnames = []
-            for col in colnames:
-                m = self.db._adapter.REGEX_TABLE_DOT_FIELD.match(col)
-                if not m:
-                    unq_colnames.append(col)
-                else:
-                    unq_colnames.append('.'.join(m.groups()))
-            return unq_colnames
+        n_to_drop = key
+        if self.last_item_id is not None:
+            if self.last_item_id < key:
+                n_to_drop -= (self.last_item_id + 1)
+            else:
+                raise IndexError
 
-        colnames = kwargs.get('colnames', self.colnames)
-        write_colnames = kwargs.get('write_colnames',True)
-        # a proper csv starting with the column names
-        if write_colnames:
-            writer.writerow(unquote_colnames(colnames))
+        # fetch and drop the first key - 1 elements
+        for i in xrange(n_to_drop):
+            self.cursor._fetchone()
+        row = next(self)
+        if row is None:
+            raise IndexError
+        else:
+            self.last_item_id = key
+            self.last_item = row
+            return row
 
-        def none_exception(value):
-            """
-            Returns a cleaned up value that can be used for csv export:
-
-            - unicode text is encoded as such
-            - None values are replaced with the given representation (default <NULL>)
-            """
-            if value is None:
-                return null
-            elif isinstance(value, unicode):
-                return value.encode('utf8')
-            elif isinstance(value,Reference):
-                return long(value)
-            elif hasattr(value, 'isoformat'):
-                return value.isoformat()[:19].replace('T', ' ')
-            elif isinstance(value, (list,tuple)): # for type='list:..'
-                return bar_encode(value)
-            return value
-
-        repr_cache = {}
-        for record in self:
-            row = []
-            for col in colnames:
-                m = self.db._adapter.REGEX_TABLE_DOT_FIELD.match(col)
-                if not m:
-                    row.append(record._extra[col])
-                else:
-                    (t, f) = m.groups()
-                    field = self.db[t][f]
-                    if isinstance(record.get(t, None), (Row,dict)):
-                        value = record[t][f]
-                    else:
-                        value = record[f]
-                    if field.type=='blob' and not value is None:
-                        value = base64.b64encode(value)
-                    elif represent and field.represent:
-                        if field.type.startswith('reference'):
-                            if field not in repr_cache:
-                                repr_cache[field] = {}
-                            if value not in repr_cache[field]:
-                                repr_cache[field][value] = field.represent(value, record)
-                            value = repr_cache[field][value]
-                        else:
-                            value = field.represent(value, record)
-                    row.append(none_exception(value))
-            writer.writerow(row)
-
-    def xml(self, strict=False, row_name='row', rows_name='rows'):
-        """
-        Serializes the table using sqlhtml.SQLTABLE (if present)
-        """
-        if not strict and not self.db.has_representer('rows_xml'):
-            strict = True
-
-        if strict:
-            return '<%s>\n%s\n</%s>' % (rows_name,
-                '\n'.join(row.as_xml(row_name=row_name,
-                                     colnames=self.colnames) for
-                          row in self), rows_name)
-
-        rv = self.db.represent('rows_xml', self)
-        if hasattr(rv, 'xml') and callable(getattr(rv, 'xml')):
-            return rv.xml()
-        return rv
-
-    def as_xml(self, row_name='row', rows_name='rows'):
-        return self.xml(strict=True, row_name=row_name, rows_name=rows_name)
-
-    def as_json(self, mode='object', default=None):
-        """
-        Serializes the rows to a JSON list or object with objects
-        mode='object' is not implemented (should return a nested
-        object structure)
-        """
-        items = [record.as_json(
-                    mode=mode, default=default, serialize=False,
-                    colnames=self.colnames
-                ) for record in self]
-
-        return serializers.json(items)
-
-    # for consistent naming yet backwards compatible
-    as_csv = __str__
-    json = as_json
+#    # rowcount it doesn't seem to be reliable on all drivers
+#    def __len__(self):
+#        return self.db._adapter.cursor.rowcount

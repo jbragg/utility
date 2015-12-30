@@ -2,13 +2,15 @@
 import datetime
 
 from .._globals import IDENTITY
-from .._load import json
+from .._compat import integer_types
 from ..drivers import couchdb
 from ..objects import Field, Query
 from ..helpers.classes import SQLALL
 from ..helpers.methods import uuid2int
 from ..helpers.serializers import serializers
 from .base import BaseAdapter, NoSQLAdapter, SELECT_ARGS
+
+long = integer_types[-1]
 
 
 class CouchDBAdapter(NoSQLAdapter):
@@ -79,20 +81,33 @@ class CouchDBAdapter(NoSQLAdapter):
                  pool_size=0,folder=None,db_codec ='UTF-8',
                  credential_decoder=IDENTITY, driver_args={},
                  adapter_args={}, do_connect=True, after_connection=None):
-        self.db = db
-        self.uri = uri
+
+        super(CouchDBAdapter, self).__init__(
+            db=db,
+            uri=uri,
+            pool_size=pool_size,
+            folder=folder,
+            db_codec=db_codec,
+            credential_decoder=credential_decoder,
+            driver_args=driver_args,
+            adapter_args=adapter_args,
+            do_connect=do_connect,
+            after_connection=after_connection)
+
         if do_connect: self.find_driver(adapter_args)
         self.dbengine = 'couchdb'
-        self.folder = folder
         db['_lastsql'] = ''
         self.db_codec = 'UTF-8'
-        self._after_connection = after_connection
-        self.pool_size = pool_size
 
         url='http://'+uri[10:]
         def connector(url=url,driver_args=driver_args):
-            return self.driver.Server(url,**driver_args)
-        self.reconnect(connector,cursor=False)
+            driver =  self.driver.Server(url,**driver_args)
+            driver.cursor = lambda : self.fake_cursor
+            driver.close = lambda : None
+            driver.commit = lambda : None
+            return driver
+
+        self.reconnect(connector)
 
     def create_table(self, table, migrate=True, fake_migrate=False, polymodel=None):
         if migrate:

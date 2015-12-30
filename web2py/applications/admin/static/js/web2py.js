@@ -75,8 +75,8 @@
          * this over and over... all will be bound to the document
          */
         /*adds btn class to buttons*/
-        $('button', target).addClass('btn');
-        $('form input[type="submit"], form input[type="button"]', target).addClass('btn');
+        $('button:not([class^="btn"])', target).addClass('btn');
+        $('form input[type="submit"]:not([class^="btn"]), form input[type="button"]:not([class^="btn"])', target).addClass('btn');
         /* javascript for PasswordWidget*/
         $('input[type=password][data-w2p_entropy]', target).each(function() {
           web2py.validate_entropy($(this));
@@ -133,7 +133,7 @@
       },
       ajax_init: function(target) {
         /*called whenever a fragment gets loaded */
-        $('.hidden', target).hide();
+        $('.w2p_hidden', target).hide();
         web2py.manage_errors(target);
         web2py.ajax_fields(target);
         web2py.show_if_handler(target);
@@ -161,7 +161,7 @@
          * and require no dom manipulations
          */
         var doc = $(document);
-        doc.on('click', '.flash', function(e) {
+        doc.on('click', '.w2p_flash', function(e) {
           var t = $(this);
           if(t.css('top') == '0px') t.slideUp('slow');
           else t.fadeOut();
@@ -241,7 +241,7 @@
           /*personally I don't like it.
            *if there's an error it it flashed and can be removed
            *as any other message
-           *doc.off('click', '.flash')
+           *doc.off('click', '.w2p_flash')
            */
           switch(xhr.status) {
             case 500:
@@ -257,12 +257,20 @@
           if(form.hasClass('no_trap')) {
             return;
           }
-          form.attr('data-w2p_target', target);
+
+          var w2p_target = $(this).attr('data-w2p_target');
+          if (typeof w2p_target === typeof undefined || w2p_target === false) {
+            form.attr('data-w2p_target', target);
+          } else {
+            target = w2p_target;
+          }
+
           var url = form.attr('action');
           if((url === "") || (url === "#") || (typeof url === 'undefined')) {
             /* form has no action. Use component url. */
             url = action;
           }
+
           form.submit(function(e) {
             web2py.disableElement(form.find(web2py.formInputClickSelector));
             web2py.hide_flash();
@@ -490,12 +498,12 @@
        * and prevent clicking on it */
       disableElement: function(el) {
         el.addClass('disabled');
-        var method = el.is('button') ? 'html' : 'val';
+        var method = el.is('input') ? 'val' : 'html';
         //method = el.attr('name') ? 'html' : 'val';
         var disable_with_message = (typeof w2p_ajax_disable_with_message != 'undefined') ? w2p_ajax_disable_with_message : "Working...";
         /*store enabled state if not already disabled */
-        if(el.data('w2p:enable-with') === undefined) {
-          el.data('w2p:enable-with', el[method]());
+        if(el.data('w2p_enable_with') === undefined) {
+          el.data('w2p_enable_with', el[method]());
         }
         /*if you don't want to see "working..." on buttons, replace the following
          * two lines with this one
@@ -515,11 +523,11 @@
 
       /* restore element to its original state which was disabled by 'disableElement' above*/
       enableElement: function(el) {
-        var method = el.is('button') ? 'val' : 'html';
-        if(el.data('w2p:enable-with') !== undefined) {
+        var method = el.is('input') ? 'val' : 'html';
+        if(el.data('w2p_enable_with') !== undefined) {
           /* set to old enabled state */
-          el[method](el.data('w2p:enable-with'));
-          el.removeData('w2p:enable-with');
+          el[method](el.data('w2p_enable_with'));
+          el.removeData('w2p_enable_with');
         }
         el.removeClass('disabled');
         el.unbind('click.w2pDisable');
@@ -530,13 +538,13 @@
       },
       /*helper for flash messages*/
       flash: function(message, status) {
-        var flash = $('.flash');
+        var flash = $('.w2p_flash');
         web2py.hide_flash();
         flash.html(message).addClass(status);
         if(flash.html()) flash.append('<span id="closeflash"> &times; </span>').slideDown();
       },
       hide_flash: function() {
-        $('.flash').fadeOut(0).html('');
+        $('.w2p_flash').fadeOut(0).html('');
       },
       show_if_handler: function(target) {
         var triggers = {};
@@ -586,12 +594,14 @@
         if(pre_call != undefined) {
           eval(pre_call);
         }
-        if(confirm_message != undefined) {
-          if(confirm_message == 'default') confirm_message = w2p_ajax_confirm_message || 'Are you sure you want to delete this object?';
-          if(!web2py.confirm(confirm_message)) {
-            web2py.stopEverything(e);
-            return;
-          }
+        if(confirm_message) {
+            if(confirm_message == 'default') 
+                confirm_message = w2p_ajax_confirm_message || 
+                    'Are you sure you want to delete this object?';
+            if(!web2py.confirm(confirm_message)) {
+                web2py.stopEverything(e);
+                return;
+            }
         }
         if(target == undefined) {
           if(method == 'GET') {
@@ -634,7 +644,7 @@
         });
       },
       /* Disables form elements:
-  - Caches element value in 'w2p:enable-with' data store
+  - Caches element value in 'w2p_enable_with' data store
   - Replaces element text with value of 'data-disable-with' attribute
   - Sets disabled property to true
     */
@@ -646,8 +656,8 @@
           if(disable_with == undefined) {
             element.data('w2p_disable_with', element[method]())
           }
-          if(element.data('w2p:enable-with') === undefined) {
-            element.data('w2p:enable-with', element[method]());
+          if(element.data('w2p_enable_with') === undefined) {
+            element.data('w2p_enable_with', element[method]());
           }
           element[method](element.data('w2p_disable_with'));
           element.prop('disabled', true);
@@ -655,16 +665,16 @@
       },
 
       /* Re-enables disabled form elements:
-  -     Replaces element text with cached value from 'w2p:enable-with' data store (created in `disableFormElements`)
+  -     Replaces element text with cached value from 'w2p_enable_with' data store (created in `disableFormElements`)
   -     Sets disabled property to false
     */
       enableFormElements: function(form) {
         form.find(web2py.enableSelector).each(function() {
           var element = $(this),
             method = element.is('button') ? 'html' : 'val';
-          if(element.data('w2p:enable-with')) {
-            element[method](element.data('w2p:enable-with'));
-            element.removeData('w2p:enable-with');
+          if(element.data('w2p_enable_with')) {
+            element[method](element.data('w2p_enable_with'));
+            element.removeData('w2p_enable_with');
           }
           element.prop('disabled', false);
         });
@@ -690,7 +700,7 @@
         $.web2py.component_handler(target);
       },
       main_hook: function() {
-        var flash = $('.flash');
+        var flash = $('.w2p_flash');
         flash.hide();
         if(flash.html()) web2py.flash(flash.html());
         web2py.ajax_init(document);

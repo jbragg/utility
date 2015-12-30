@@ -4,11 +4,14 @@ import re
 import sys
 
 from .._globals import IDENTITY, GLOBAL_LOCKER
+from .._compat import PY2, integer_types, basestring
 from ..connection import ConnectionPool
 from ..objects import Field, Query, Expression
 from ..helpers.classes import SQLALL
 from ..helpers.methods import use_common_filters
 from .base import NoSQLAdapter
+
+long = integer_types[-1]
 
 
 class IMAPAdapter(NoSQLAdapter):
@@ -158,7 +161,7 @@ class IMAPAdapter(NoSQLAdapter):
 
     dbengine = 'imap'
 
-    REGEX_URI = re.compile('^(?P<user>[^:]+)(\:(?P<password>[^@]*))?@(?P<host>[^\:@]+)(\:(?P<port>[0-9]+))?$')
+    REGEX_URI = re.compile('^(?P<user>[^:]+)(\:(?P<password>[^@]*))?@(?P<host>\[[^/]+\]|[^\:@]+)(\:(?P<port>[0-9]+))?$')
 
     def __init__(self,
                  db,
@@ -172,16 +175,22 @@ class IMAPAdapter(NoSQLAdapter):
                  do_connect=True,
                  after_connection=None):
 
+        super(IMAPAdapter, self).__init__(
+            db=db,
+            uri=uri,
+            pool_size=pool_size,
+            folder=folder,
+            db_codec=db_codec,
+            credential_decoder=credential_decoder,
+            driver_args=driver_args,
+            adapter_args=adapter_args,
+            do_connect=do_connect,
+            after_connection=after_connection)
+
         # db uri: user@example.com:password@imap.server.com:123
         # TODO: max size adapter argument for preventing large mail transfers
 
-        self.db = db
-        self.uri = uri
         if do_connect: self.find_driver(adapter_args)
-        self.pool_size=pool_size
-        self.folder = folder
-        self.db_codec = db_codec
-        self._after_connection = after_connection
         self.credential_decoder = credential_decoder
         self.driver_args = driver_args
         self.adapter_args = adapter_args
@@ -235,8 +244,10 @@ class IMAPAdapter(NoSQLAdapter):
             # static mailbox list
             connection.mailbox_names = None
 
-            # dummy cursor function
-            connection.cursor = lambda : True
+            # dummy dbapi functions
+            connection.cursor = lambda : self.fake_cursor
+            connection.close = lambda : None
+            connection.commit = lambda : None
 
             return connection
 
@@ -244,7 +255,7 @@ class IMAPAdapter(NoSQLAdapter):
         self.connector = connector
         if do_connect: self.reconnect()
 
-    def reconnect(self, f=None, cursor=True):
+    def reconnect(self, f=None):
         """
         IMAP4 Pool connection method
 
@@ -261,7 +272,7 @@ class IMAPAdapter(NoSQLAdapter):
 
         if not self.pool_size:
             self.connection = f()
-            self.cursor = cursor and self.connection.cursor()
+            self.cursor = self.connection.cursor()
         else:
             POOLS = ConnectionPool.POOLS
             uri = self.uri
@@ -272,7 +283,7 @@ class IMAPAdapter(NoSQLAdapter):
                 if POOLS[uri]:
                     self.connection = POOLS[uri].pop()
                     GLOBAL_LOCKER.release()
-                    self.cursor = cursor and self.connection.cursor()
+                    self.cursor = self.connection.cursor()
                     if self.cursor and self.check_active_connection:
                         try:
                             # check if connection is alive or close it
@@ -285,7 +296,7 @@ class IMAPAdapter(NoSQLAdapter):
                 else:
                     GLOBAL_LOCKER.release()
                     self.connection = f()
-                    self.cursor = cursor and self.connection.cursor()
+                    self.cursor = self.connection.cursor()
                     break
         self.after_connection_hook()
 
@@ -342,10 +353,10 @@ class IMAPAdapter(NoSQLAdapter):
                 year = int(date_list[2])
                 month = months.index(date_list[1].upper())
                 day = int(date_list[0])
-                hms = map(int, date_list[3].split(":"))
+                hms = list(map(int, date_list[3].split(":")))
                 return datetime.datetime(year, month, day,
                     hms[0], hms[1], hms[2]) + add
-            except (ValueError, AttributeError, IndexError), e:
+            except (ValueError, AttributeError, IndexError) as e:
                 self.db.logger.error("Could not parse date text: %s. %s" %
                              (date, e))
                 return None
@@ -368,7 +379,7 @@ class IMAPAdapter(NoSQLAdapter):
         """ convert text for mail to unicode"""
         if text is None:
             text = ""
-        else:
+        if PY2:
             if isinstance(text, str):
                 if charset is None:
                     text = unicode(text, "utf-8", errors)
@@ -376,7 +387,11 @@ class IMAPAdapter(NoSQLAdapter):
                     text = unicode(text, charset, errors)
             else:
                 raise Exception("Unsupported mail text type %s" % type(text))
-        return text.encode("utf-8")
+            return text.encode("utf-8")
+        else:
+            if isinstance(text, bytes):
+                return text.decode("utf-8")
+            return text
 
     def get_charset(self, message):
         charset = message.get_content_charset()
@@ -560,7 +575,11 @@ class IMAPAdapter(NoSQLAdapter):
                                       "raw_message": data[0][1]}
                                 fr["multipart"] = fr["email"].is_multipart()
                                 # fetch flags for the message
-                                fr["flags"] = self.driver.ParseFlags(data[1])
+                                if PY2:
+                                    fr["flags"] = self.driver.ParseFlags(data[1])
+                                else:
+                                    fr["flags"] = self.driver.ParseFlags(
+                                        bytes(data[1], "utf-8"))
                                 fetch_results.append(fr)
                             else:
                                 # error retrieving the message body

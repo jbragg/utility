@@ -17,10 +17,19 @@ Links
 * `documentation <http://www.web2py.com/books/default/chapter/29/06/the-database-abstraction-layer>`_
 """
 
+import re
+import ast
 from setuptools import setup
+
+_version_re = re.compile(r'__version__\s+=\s+(.*)')
+
+with open('pydal/__init__.py', 'rb') as f:
+    version = str(ast.literal_eval(_version_re.search(
+        f.read().decode('utf-8')).group(1)))
+
 setup(
     name='pyDAL',
-    version='15.03',
+    version=version,
     url='https://github.com/web2py/pydal',
     license='BSD',
     author='Massimo Di Pierro',
@@ -29,8 +38,7 @@ setup(
     maintainer_email='gi0baro@d4net.org',
     description='a pure Python Database Abstraction Layer',
     long_description=__doc__,
-    packages=['pydal', 'pydal.adapters', 'pydal.helpers', 'pydal.contrib',
-              'pydal.contrib.simplejson'],
+    packages=['pydal', 'pydal.adapters', 'pydal.helpers', 'pydal.contrib'],
     include_package_data=True,
     zip_safe=False,
     platforms='any',
@@ -42,6 +50,7 @@ setup(
         'Operating System :: OS Independent',
         'Programming Language :: Python',
         'Programming Language :: Python :: 2',
+        'Programming Language :: Python :: 3',
         'Topic :: Database :: Front-Ends',
         'Topic :: Software Development :: Libraries :: Python Modules'
     ]

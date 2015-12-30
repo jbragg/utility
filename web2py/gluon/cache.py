@@ -58,7 +58,7 @@ def remove_oldest_entries(storage, percentage=90):
     # compute current memory usage (%)
     old_mem = psutil.virtual_memory().percent
     # if we have data in storage and utilization exceeds 90%
-    while storage and old_mem > percentage:    
+    while storage and old_mem > percentage:
         # removed oldest entry
         storage.popitem(last=False)
         # garbage collect
@@ -378,7 +378,7 @@ class CacheOnDisk(CacheAbstract):
 
 
         def safe_apply(self, key, function, default_value=None):
-            """ 
+            """
             Safely apply a function to the value of a key in storage and set
             the return value of the function to it.
 
@@ -473,9 +473,14 @@ class CacheOnDisk(CacheAbstract):
         if item and ((dt is None) or (item[0] > now - dt)):
             value = item[1]
         else:
-            value = f()
+            try:
+                value = f()
+            except:
+                self.storage.release(CacheAbstract.cache_stats_name)
+                self.storage.release(key)
+                raise
             self.storage[key] = (now, value)
-            self.storage.safe_apply(CacheAbstract.cache_stats_name, inc_misses, 
+            self.storage.safe_apply(CacheAbstract.cache_stats_name, inc_misses,
                                     default_value={'hit_total': 0, 'misses': 0})
 
         self.storage.release(CacheAbstract.cache_stats_name)
@@ -601,22 +606,26 @@ class Cache(object):
             def wrapped_f():
                 if current.request.env.request_method != 'GET':
                     return func()
+
+                if quick:
+                    session_ = True if 'S' in quick else False
+                    vars_ = True if 'V' in quick else False
+                    lang_ = True if 'L' in quick else False
+                    user_agent_ = True if 'U' in quick else False
+                    public_ = True if 'P' in quick else False
+                else:
+                    (session_, vars_, lang_, user_agent_, public_) = \
+                        (session, vars, lang, user_agent, public)
+
                 if time_expire:
                     cache_control = 'max-age=%(time_expire)s, s-maxage=%(time_expire)s' % dict(time_expire=time_expire)
-                    if quick:
-                        session_ = True if 'S' in quick else False
-                        vars_ = True if 'V' in quick else False
-                        lang_ = True if 'L' in quick else False
-                        user_agent_ = True if 'U' in quick else False
-                        public_ = True if 'P' in quick else False
-                    else:
-                        session_, vars_, lang_, user_agent_, public_ = session, vars, lang, user_agent, public
                     if not session_ and public_:
                         cache_control += ', public'
                         expires = (current.request.utcnow + datetime.timedelta(seconds=time_expire)).strftime('%a, %d %b %Y %H:%M:%S GMT')
                     else:
                         cache_control += ', private'
                         expires = 'Fri, 01 Jan 1990 00:00:00 GMT'
+
                 if cache_model:
                     #figure out the correct cache key
                     cache_key = [current.request.env.path_info, current.response.view]

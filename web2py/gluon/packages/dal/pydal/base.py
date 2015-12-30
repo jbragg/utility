@@ -123,20 +123,21 @@ For more info::
 
 """
 
-import threading
-import socket
-import urllib
-import time
 import copy
-import traceback
 import glob
 import logging
+import socket
+import threading
+import time
+import traceback
+import urllib
 from uuid import uuid4
 
-from ._compat import pickle, hashlib_md5, pjoin, ogetattr, osetattr, copyreg
+from ._compat import PY2, pickle, hashlib_md5, pjoin, copyreg, integer_types, \
+    with_metaclass
 from ._globals import GLOBAL_LOCKER, THREAD_LOCAL, DEFAULT
 from ._load import OrderedDict
-from .helpers.classes import Serializable, SQLCallableList
+from .helpers.classes import Serializable, SQLCallableList, BasicStorage
 from .helpers.methods import hide_password, smart_query, auto_validators, \
     auto_represent
 from .helpers.regex import REGEX_PYTHON_KEYWORDS, REGEX_DBNAME, \
@@ -145,6 +146,8 @@ from .helpers.serializers import serializers
 from .objects import Table, Field, Row, Set
 from .adapters import ADAPTERS
 from .adapters.base import BaseAdapter
+
+long = integer_types[-1]
 
 
 TABLE_ARGS = set(
@@ -158,7 +161,7 @@ class MetaDAL(type):
         #: intercept arguments for DAL costumisation on call
         intercepts = [
             'logger', 'representers', 'serializers', 'uuid', 'validators',
-            'validators_method']
+            'validators_method', 'Table', 'Row']
         intercepted = []
         for name in intercepts:
             val = kwargs.get(name)
@@ -172,7 +175,7 @@ class MetaDAL(type):
         return obj
 
 
-class DAL(Serializable):
+class DAL(with_metaclass(MetaDAL, Serializable, BasicStorage)):
     """
     An instance of this class represents a database connection
 
@@ -228,7 +231,7 @@ class DAL(Serializable):
             definitions from the databases folder (works only for simple models)
         bigint_id: If set, turn on bigint instead of int for id and reference
             fields
-        lazy_tables: delaya table definition until table access
+        lazy_tables: delays table definition until table access
         after_connection: can a callable that will be executed after the
             connection
 
@@ -246,8 +249,6 @@ class DAL(Serializable):
 
 
     """
-    __metaclass__ = MetaDAL
-
     serializers = None
     validators = None
     validators_method = None
@@ -256,6 +257,7 @@ class DAL(Serializable):
     logger = logging.getLogger("pyDAL")
 
     Table = Table
+    Row = Row
 
     def __new__(cls, uri='sqlite://dummy.db', *args, **kwargs):
         if not hasattr(THREAD_LOCAL, 'db_instances'):
@@ -372,6 +374,12 @@ class DAL(Serializable):
 
         if uri == '<zombie>' and db_uid is not None:
             return
+        super(DAL, self).__init__()
+
+        if not issubclass(self.Row, Row):
+            raise RuntimeError(
+                '`Row` class must be a subclass of pydal.objects.Row'
+            )
 
         from .drivers import DRIVERS, is_jdbc
         self._drivers_available = DRIVERS
@@ -410,7 +418,6 @@ class DAL(Serializable):
             attempts = 5
         if uri:
             uris = isinstance(uri, (list, tuple)) and uri or [uri]
-            error = ''
             connected = False
             for k in range(attempts):
                 for uri in uris:
@@ -418,11 +425,15 @@ class DAL(Serializable):
                         if is_jdbc and not uri.startswith('jdbc:'):
                             uri = 'jdbc:'+uri
                         self._dbname = REGEX_DBNAME.match(uri).group()
-                        if not self._dbname in ADAPTERS:
-                            raise SyntaxError("Error in URI '%s' or database not supported" % self._dbname)
+                        if self._dbname not in ADAPTERS:
+                            raise SyntaxError(
+                                "Error in URI '%s' or database not supported"
+                                % self._dbname
+                            )
                         # notice that driver args or {} else driver_args
                         # defaults to {} global, not correct
-                        kwargs = dict(db=self,uri=uri,
+                        kwargs = dict(db=self,
+                                      uri=uri,
                                       pool_size=pool_size,
                                       folder=folder,
                                       db_codec=db_codec,
@@ -441,25 +452,31 @@ class DAL(Serializable):
                         if bigint_id:
                             if 'big-id' in types and 'reference' in types:
                                 self._adapter.types['id'] = types['big-id']
-                                self._adapter.types['reference'] = types['big-reference']
+                                self._adapter.types['reference'] = \
+                                    types['big-reference']
                         connected = True
                         break
                     except SyntaxError:
                         raise
                     except Exception:
                         tb = traceback.format_exc()
-                        self.logger.debug('DEBUG: connect attempt %i, connection error:\n%s' % (k, tb))
+                        self.logger.debug(
+                            'DEBUG: connect attempt %i, connection error:\n%s'
+                            % (k, tb)
+                        )
                 if connected:
                     break
                 else:
                     time.sleep(1)
             if not connected:
-                raise RuntimeError("Failure to connect, tried %d times:\n%s" % (attempts, tb))
+                raise RuntimeError(
+                    "Failure to connect, tried %d times:\n%s" % (attempts, tb)
+                )
         else:
-            self._adapter = BaseAdapter(db=self,pool_size=0,
-                                        uri='None',folder=folder,
-                                        db_codec=db_codec, after_connection=after_connection,
-                                        entity_quoting=entity_quoting)
+            self._adapter = BaseAdapter(
+                db=self, pool_size=0, uri='None', folder=folder,
+                db_codec=db_codec, after_connection=after_connection,
+                entity_quoting=entity_quoting)
             migrate = fake_migrate = False
         adapter = self._adapter
         self._uri_hash = table_hash or hashlib_md5(adapter.uri).hexdigest()
@@ -634,7 +651,7 @@ class DAL(Serializable):
                 else:
                     i += 1
         if '/'.join(args) == 'patterns':
-            return Row({'status':200,'pattern':'list',
+            return self.Row({'status':200,'pattern':'list',
                         'error':None,'response':patterns})
         for pattern in patterns:
             basequery, exposedfields = None, []
@@ -714,7 +731,7 @@ class DAL(Serializable):
                             try:
                                 dbset=db(db[table][field].belongs(dbset._select(db[otable][selfld])))
                             except ValueError:
-                                return Row({'status':400,'pattern':pattern,
+                                return self.Row({'status':400,'pattern':pattern,
                                             'error':'invalid path','response':None})
                         else:
                             items = [item.id for item in dbset.select(db[otable][selfld])]
@@ -730,20 +747,20 @@ class DAL(Serializable):
                     if not field in db[table]: break
                     # hand-built patterns should respect .readable=False as well
                     if not db[table][field].readable:
-                        return Row({'status':418,'pattern':pattern,
+                        return self.Row({'status':418,'pattern':pattern,
                                     'error':'I\'m a teapot','response':None})
                     try:
                         distinct = vars.get('distinct', False) == 'True'
                         offset = long(vars.get('offset',None) or 0)
                         limits = (offset,long(vars.get('limit',None) or 1000)+offset)
                     except ValueError:
-                        return Row({'status':400,'error':'invalid limits','response':None})
+                        return self.Row({'status':400,'error':'invalid limits','response':None})
                     items =  dbset.select(db[table][field], distinct=distinct, limitby=limits)
                     if items:
-                        return Row({'status':200,'response':items,
+                        return self.Row({'status':200,'response':items,
                                     'pattern':pattern})
                     else:
-                        return Row({'status':404,'pattern':pattern,
+                        return self.Row({'status':404,'pattern':pattern,
                                     'error':'no record found','response':None})
                 elif tag != args[i]:
                     break
@@ -757,7 +774,7 @@ class DAL(Serializable):
                     try:
                         orderby = [db[table][f] if not f.startswith('~') else ~db[table][f[1:]] for f in ofields]
                     except (KeyError, AttributeError):
-                        return Row({'status':400,'error':'invalid orderby','response':None})
+                        return self.Row({'status':400,'error':'invalid orderby','response':None})
                     if exposedfields:
                         fields = [field for field in db[table] if str(field).split('.')[-1] in exposedfields and field.readable]
                     else:
@@ -767,17 +784,17 @@ class DAL(Serializable):
                         offset = long(vars.get('offset',None) or 0)
                         limits = (offset,long(vars.get('limit',None) or 1000)+offset)
                     except ValueError:
-                        return Row({'status':400,'error':'invalid limits','response':None})
+                        return self.Row({'status':400,'error':'invalid limits','response':None})
                     #if count > limits[1]-limits[0]:
-                    #    return Row({'status':400,'error':'too many records','response':None})
+                    #    return self.Row({'status':400,'error':'too many records','response':None})
                     try:
                         response = dbset.select(limitby=limits,orderby=orderby,*fields)
                     except ValueError:
-                        return Row({'status':400,'pattern':pattern,
+                        return self.Row({'status':400,'pattern':pattern,
                                     'error':'invalid path','response':None})
-                    return Row({'status':200,'response':response,
+                    return self.Row({'status':200,'response':response,
                                 'pattern':pattern,'count':count})
-        return Row({'status':400,'error':'no matching pattern','response':None})
+        return self.Row({'status':400,'error':'no matching pattern','response':None})
 
     def define_table(
         self,
@@ -866,15 +883,17 @@ class DAL(Serializable):
         db_uid = uri = None
         if not sanitize:
             uri, db_uid = (self._uri, self._db_uid)
-        db_as_dict = dict(tables=[], uri=uri, db_uid=db_uid,
-                          **dict([(k, getattr(self, "_" + k, None))
-                          for k in 'pool_size','folder','db_codec',
-                          'check_reserved','migrate','fake_migrate',
-                          'migrate_enabled','fake_migrate_all',
-                          'decode_credentials','driver_args',
-                          'adapter_args', 'attempts',
-                          'bigint_id','debug','lazy_tables',
-                          'do_connect']))
+        db_as_dict = dict(
+            tables=[],
+            uri=uri,
+            db_uid=db_uid,
+            **dict(
+                [(k, getattr(self, "_" + k, None)) for k in [
+                    'pool_size', 'folder', 'db_codec', 'check_reserved',
+                    'migrate', 'fake_migrate', 'migrate_enabled',
+                    'fake_migrate_all', 'decode_credentials', 'driver_args',
+                    'adapter_args', 'attempts', 'bigint_id', 'debug',
+                    'lazy_tables', 'do_connect']]))
         for table in self:
             db_as_dict["tables"].append(table.as_dict(flat=flat,
                                         sanitize=sanitize))
@@ -887,11 +906,6 @@ class DAL(Serializable):
             # The instance has no .tables attribute yet
             return False
 
-    has_key = __contains__
-
-    def get(self, key, default=None):
-        return self.__dict__.get(key, default)
-
     def __iter__(self):
         for tablename in self.tables:
             yield self[tablename]
@@ -900,40 +914,39 @@ class DAL(Serializable):
         return self.__getattr__(str(key))
 
     def __getattr__(self, key):
-        if ogetattr(self,'_lazy_tables') and \
-                key in ogetattr(self,'_LAZY_TABLES'):
+        if object.__getattribute__(self, '_lazy_tables') and \
+                key in object.__getattribute__(self, '_LAZY_TABLES'):
             tablename, fields, args = self._LAZY_TABLES.pop(key)
-            return self.lazy_define_table(tablename,*fields,**args)
-        return ogetattr(self, key)
-
-    def __setitem__(self, key, value):
-        osetattr(self, str(key), value)
+            return self.lazy_define_table(tablename, *fields, **args)
+        return BasicStorage.__getattribute__(self, key)
 
     def __setattr__(self, key, value):
-        if key[:1]!='_' and key in self:
+        if key[:1] != '_' and key in self:
             raise SyntaxError(
                 'Object %s exists and cannot be redefined' % key)
-        osetattr(self,key,value)
-
-    __delitem__ = object.__delattr__
+        return super(DAL, self).__setattr__(key, value)
 
     def __repr__(self):
-        if hasattr(self,'_uri'):
+        if hasattr(self, '_uri'):
             return '<DAL uri="%s">' % hide_password(self._adapter.uri)
         else:
             return '<DAL db_uid="%s">' % self._db_uid
 
-    def smart_query(self,fields,text):
-        return Set(self, smart_query(fields,text))
+    def smart_query(self, fields, text):
+        return Set(self, smart_query(fields, text))
 
     def __call__(self, query=None, ignore_common_filters=None):
-        if isinstance(query,Table):
+        return self.where(query, ignore_common_filters)
+
+    def where(self, query=None, ignore_common_filters=None):
+        if isinstance(query, Table):
             query = self._adapter.id_query(query)
-        elif isinstance(query,Field):
-            query = query!=None
+        elif isinstance(query, Field):
+            query = query != None
         elif isinstance(query, dict):
             icf = query.get("ignore_common_filters")
-            if icf: ignore_common_filters = icf
+            if icf:
+                ignore_common_filters = icf
         return Set(self, query, ignore_common_filters=ignore_common_filters)
 
     def commit(self):
@@ -1015,6 +1028,11 @@ class DAL(Serializable):
             fields = colnames or [f[0] for f in columns]
             if len(fields) != len(set(fields)):
                 raise RuntimeError("Result set includes duplicate column names. Specify unique column names using the 'colnames' argument")
+            #: avoid bytes strings in columns names (py3)
+            if columns and not PY2:
+                for i in range(0, len(fields)):
+                    if isinstance(fields[i], bytes):
+                        fields[i] = fields[i].decode("utf8")
 
             # will hold our finished resultset in a list
             data = adapter._fetchall()
@@ -1103,6 +1121,9 @@ class DAL(Serializable):
                             break
                 else:
                     raise RuntimeError("Unable to import table that does not exist.\nTry db.import_from_csv_file(..., map_tablenames={'table':'othertable'},ignore_missing_tables=True)")
+
+    def can_join(self):
+        return self._adapter.can_join()
 
 
 def DAL_unpickler(db_uid):
