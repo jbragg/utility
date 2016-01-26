@@ -654,7 +654,7 @@ def choose_condition():
     # Else, let's make a new one.
 
     # Choose a condition.  First, give special conditions a shot
-    for probability, condition in options[request.task]['special_conditions'] or []:
+    for probability, condition in options[request.task].get('special_conditions', []):
         if random.random() < probability:
             request.condition = condition.copy()
             break
@@ -681,7 +681,7 @@ def choose_condition():
     # If this is a CHANGE of condition for the worker (because they
     # were working in a prior phase), let's set a flag so that the
     # view can tell the worker to pay attention to the difference
-    if db((db.experimental_assignments.phase < request.phase)
+    if request.phase is not None and db((db.experimental_assignments.phase < request.phase)
           & (db.experimental_assignments.study == request.study)
           & (db.experimental_assignments.workerid == request.workerid)).count() > 0:
         request.new_phase = True
