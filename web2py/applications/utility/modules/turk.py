@@ -11,7 +11,7 @@ import csv
 from datetime import datetime, timedelta
 import traceback
 import types
-from dal import *
+from dal import DAL
 import gluon.contrib.simplejson as json
 # import autoreload
 # autoreload.run()
@@ -548,8 +548,9 @@ def update_hit(xml=None, hitid=None):
 
     row = db.hits(hitid = hitid)
     if not row:
-        row = db.hits.insert(hitid = hitid,
-                             launch_date = datetime.now())
+        rowid = db.hits.insert(hitid = hitid,
+                               launch_date = datetime.now())
+        row = db.hits(id = rowid)
     row.update_record(xmlcache = xml.toxml(),
                       status = get(xml, 'HITStatus'))
     db.commit()
