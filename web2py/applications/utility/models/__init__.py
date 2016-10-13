@@ -25,7 +25,9 @@ email_address = 'your@address.com'  # errors will be emailed to you here
 database_login_pass = ('login', 'pass')
 database_name = 'utility'
 server_url = 'localhost'
+external_server_url = server_url
 server_port = 8000
+external_server_port = server_port
 aws_access_key_id = 'fillthisin'
 aws_secret_access_key = 'andthistoo'
 '''

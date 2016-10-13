@@ -200,6 +200,6 @@ def pretty_int(x):
 
 # ============== Random Help =============
 def hit_serve_url(task):
-    url = 'localhost' if (sandbox_serves_from_localhost_p and sandboxp) else server_url
-    return 'https://%s:%s/%s?live' % (url, server_port, task)
+    url = 'localhost' if (sandbox_serves_from_localhost_p and sandboxp) else external_server_url
+    return 'https://%s:%s/%s?live' % (url, external_server_port, task)
 def url(f,args=[],vars={}): return URL(r=request,f=f,args=args,vars=vars)
