@@ -749,9 +749,11 @@ def sample_firsts_from_conditions(conditions):
     for (k,v) in conditions.items():
         result[k] = singleton(v) if is_singleton(v) else v[0]
     return result
-def task_for(controller, function):
+def task_for(controller, function, args):
     possible_tasks = ['%s/%s' % (controller, function),
                       controller]
+    if args:
+        possible_tasks = ['%s/%s' % (t, '/'.join(args)) for t in possible_tasks]
     for t in possible_tasks:
         if t in options and isinstance(options[t], dict):
             return t
@@ -905,7 +907,7 @@ def load_live_hit():
     return
 
 def load_testing_hit():
-    request.task = task_for(request.controller, request.function)
+    request.task = task_for(request.controller, request.function, request.args)
     # Set up the task options, now that we know the task:
     make_request_vars_convenient() 
     task_options = options[request.task] if \

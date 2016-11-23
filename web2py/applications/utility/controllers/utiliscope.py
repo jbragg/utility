@@ -50,9 +50,9 @@ def prep_test(as_preview=False):
 
     # Make the new url
     url = URL(r=request, c=controller, f=function,
-              args=[], vars=request.get_vars)
+              args=request.args, vars=request.get_vars)
 
-    request.task = task_for(controller, function)
+    request.task = task_for(controller, function, request.args)
     conditions = (request.task in options
                   and isinstance(options[request.task], dict)
                   and options[request.task]) or {}
