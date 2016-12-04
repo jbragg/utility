@@ -1,0 +1,4 @@
+dependencies:
+    - python=2.7
+    - scipy=0.18.*
+    - psycopg2=2.6.*
