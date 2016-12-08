@@ -632,7 +632,9 @@ def choose_condition():
                 "Can't call choose condition on preview.")
 
     # if this assignment exists, return its condition
-    action = db.actions(assid=request.assid)
+    # NOTE: Need to query for workerid also, or assignment may be recycled
+    # and this would set condition to another worker's condition..
+    action = db.actions(assid=request.assid, workerid=request.workerid)
     if action:
         request.condition = sj.loads(action.condition.json)
         request.phase = action.phase
