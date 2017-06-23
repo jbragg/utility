@@ -23,6 +23,7 @@ import glob
 import os
 import re
 import time
+import fnmatch
 import traceback
 import smtplib
 import urllib
@@ -34,13 +35,12 @@ import email.utils
 import random
 import hmac
 import hashlib
-import json
 from email import MIMEBase, MIMEMultipart, MIMEText, Encoders, Header, message_from_string, Charset
 
 from gluon.serializers import json_parser
 from gluon.contenttype import contenttype
 from gluon.storage import Storage, StorageList, Settings, Messages
-from gluon.utils import web2py_uuid
+from gluon.utils import web2py_uuid, compare
 from gluon.fileutils import read_file, check_credentials
 from gluon import *
 from gluon.contrib.autolinks import expand_one
@@ -52,17 +52,6 @@ import gluon.serializers as serializers
 
 Table = DAL.Table
 Field = DAL.Field
-
-try:
-    # try stdlib (Python 2.6)
-    import json as json_parser
-except ImportError:
-    try:
-        # try external module
-        import simplejson as json_parser
-    except:
-        # fallback to pure-Python module
-        import gluon.contrib.simplejson as json_parser
 
 __all__ = ['Mail', 'Auth', 'Recaptcha', 'Recaptcha2', 'Crud', 'Service', 'Wiki',
            'PluginManager', 'fetch', 'geocode', 'reverse_geocode', 'prettydate']
@@ -265,7 +254,7 @@ class Mail(object):
             MIMEBase.MIMEBase.__init__(self, *content_type.split('/', 1))
             self.set_payload(payload)
             self['Content-Disposition'] = 'attachment; filename="%s"' % filename
-            if not content_id is None:
+            if content_id is not None:
                 self['Content-Id'] = '<%s>' % content_id.encode(encoding)
             Encoders.encode_base64(self)
 
@@ -789,16 +778,16 @@ class Mail(object):
                 if attachments:
                     result = mail.send_mail(
                         sender=sender, to=origTo,
-                        subject=unicode(subject), body=unicode(text), html=html,
+                        subject=unicode(subject, encoding), body=unicode(text, encoding), html=html,
                         attachments=attachments, **xcc)
                 elif html and (not raw):
                     result = mail.send_mail(
                         sender=sender, to=origTo,
-                        subject=unicode(subject), body=unicode(text), html=html, **xcc)
+                        subject=unicode(subject, encoding), body=unicode(text, encoding), html=html, **xcc)
                 else:
                     result = mail.send_mail(
                         sender=sender, to=origTo,
-                        subject=unicode(subject), body=unicode(text), **xcc)
+                        subject=unicode(subject, encoding), body=unicode(text, encoding), **xcc)
             else:
                 smtp_args = self.settings.server.split(':')
                 kwargs = dict(timeout=self.settings.timeout)
@@ -831,12 +820,12 @@ class Recaptcha(DIV):
     Examples:
         Use as::
 
-            form = FORM(Recaptcha(public_key='...',private_key='...'))
+            form = FORM(Recaptcha(public_key='...', private_key='...'))
 
         or::
 
             form = SQLFORM(...)
-            form.append(Recaptcha(public_key='...',private_key='...'))
+            form.append(Recaptcha(public_key='...', private_key='...'))
 
     """
 
@@ -995,17 +984,17 @@ class Recaptcha2(DIV):
     Examples:
         Use as::
 
-            form = FORM(Recaptcha2(public_key='...',private_key='...'))
+            form = FORM(Recaptcha2(public_key='...', private_key='...'))
 
         or::
 
             form = SQLFORM(...)
-            form.append(Recaptcha2(public_key='...',private_key='...'))
+            form.append(Recaptcha2(public_key='...', private_key='...'))
 
         to protect the login page instead, use::
 
             from gluon.tools import Recaptcha2
-            auth.settings.captcha = Recaptcha2(request, public_key='...',private_key='...')
+            auth.settings.captcha = Recaptcha2(request, public_key='...', private_key='...')
 
     """
 
@@ -1143,8 +1132,7 @@ def addrow(form, a, b, c, style, _id, position=-1):
 class AuthJWT(object):
 
     """
-    If left externally, this needs the usual "singleton" approach.
-    Given I (we) don't know if to include in auth yet, let's stick to basics.
+    Experimental!
 
     Args:
      - secret_key: the secret. Without salting, an attacker knowing this can impersonate
@@ -1175,7 +1163,9 @@ class AuthJWT(object):
                                return payload
      - before_authorization: can be a callable that takes the deserialized token (a dict) as input.
                              Gets called right after signature verification but before the actual
-                             authorization takes place. You can raise with HTTP a proper error message
+                             authorization takes place. It may be use to cast
+                             the extra auth_user fields to their actual types.
+                             You can raise with HTTP a proper error message
                              Example:
                              def mybefore_authorization(tokend):
                                  if not tokend['my_name_is'] == 'bond,james bond':
@@ -1192,8 +1182,8 @@ class AuthJWT(object):
         def login_and_take_token():
             return myjwt.jwt_token_manager()
 
-    A call then to /app/controller/login_and_take_token/auth with username and password returns the token
-    A call to /app/controller/login_and_take_token/refresh with the original token returns the refreshed token
+    A call then to /app/controller/login_and_take_token with username and password returns the token
+    A call to /app/controller/login_and_take_token with the original token returns the refreshed token
 
     To protect a function with JWT
 
@@ -1204,7 +1194,7 @@ class AuthJWT(object):
 
     """
 
-    def __init__(self, 
+    def __init__(self,
                  auth,
                  secret_key,
                  algorithm='HS256',
@@ -1227,7 +1217,7 @@ class AuthJWT(object):
         self.auth = auth
         self.algorithm = algorithm
         if self.algorithm not in ('HS256', 'HS384', 'HS512'):
-            raise NotImplementedError('Algoritm %s not allowed' % algorithm)
+            raise NotImplementedError('Algorithm %s not allowed' % algorithm)
         self.verify_expiration = verify_expiration
         self.leeway = leeway
         self.expiration = expiration
@@ -1256,7 +1246,7 @@ class AuthJWT(object):
     @staticmethod
     def jwt_b64e(string):
         if isinstance(string, unicode):
-            string = string.encode('uft-8', 'strict')
+            string = string.encode('utf-8', 'strict')
         return base64.urlsafe_b64encode(string).strip(b'=')
 
     @staticmethod
@@ -1279,7 +1269,7 @@ class AuthJWT(object):
             if isinstance(secret, unicode):
                 secret = secret.encode('ascii', 'ignore')
         b64h = self.cached_b64h
-        b64p = self.jwt_b64e(json_parser.dumps(payload))
+        b64p = self.jwt_b64e(serializers.json(payload))
         jbody = b64h + '.' + b64p
         mauth = hmac.new(key=secret, msg=jbody, digestmod=self.digestmod)
         jsign = self.jwt_b64e(mauth.digest())
@@ -1287,7 +1277,7 @@ class AuthJWT(object):
 
     def verify_signature(self, body, signature, secret):
         mauth = hmac.new(key=secret, msg=body, digestmod=self.digestmod)
-        return hmac.compare_digest(self.jwt_b64e(mauth.digest()), signature)
+        return compare(self.jwt_b64e(mauth.digest()), signature)
 
     def load_token(self, token):
         if isinstance(token, unicode):
@@ -1298,7 +1288,7 @@ class AuthJWT(object):
             # header not the same
             raise HTTP(400, u'Invalid JWT Header')
         secret = self.secret_key
-        tokend = json_parser.loads(self.jwt_b64d(b64b))
+        tokend = serializers.loads_json(self.jwt_b64d(b64b))
         if self.salt:
             if callable(self.salt):
                 secret = "%s$%s" % (secret, self.salt(tokend))
@@ -1324,7 +1314,11 @@ class AuthJWT(object):
         We (mis)use the heavy default auth mechanism to avoid any further computation,
         while sticking to a somewhat-stable Auth API.
         """
-        now = time.mktime(datetime.datetime.utcnow().timetuple())
+        # TODO: Check the following comment
+        ## is the following safe or should we use
+        ## calendar.timegm(datetime.datetime.utcnow().timetuple())
+        ## result seem to be the same (seconds since epoch, in UTC)
+        now = time.mktime(datetime.datetime.now().timetuple())
         expires = now + self.expiration
         payload = dict(
             hmac_key=session_auth['hmac_key'],
@@ -1336,7 +1330,7 @@ class AuthJWT(object):
         return payload
 
     def refresh_token(self, orig_payload):
-        now = time.mktime(datetime.datetime.utcnow().timetuple())
+        now = time.mktime(datetime.datetime.now().timetuple())
         if self.verify_expiration:
             orig_exp = orig_payload['exp']
             if orig_exp + self.leeway < now:
@@ -1346,7 +1340,7 @@ class AuthJWT(object):
         if orig_iat + self.refresh_expiration_delta < now:
             # refreshed too long ago
             raise HTTP(400, u'Token issued too long ago')
-        expires = now + self.refresh_expiration_delta
+        expires = now + self.expiration
         orig_payload.update(
             orig_iat=orig_iat,
             iat=now,
@@ -1372,14 +1366,17 @@ class AuthJWT(object):
             def api_auth():
                 return myjwt.jwt_token_manager()
 
-        Then, a call to /app/c/api_auth/auth with username and password
-        returns a token, while /app/c/api_auth/refresh with the current token
+        Then, a call to /app/c/api_auth with username and password
+        returns a token, while /app/c/api_auth with the current token
         issues another token
         """
         request = current.request
         response = current.response
         session = current.session
         # forget and unlock response
+        session.forget(response)
+        valid_user = None
+        ret = None
         if request.vars.token:
             if not self.allow_refresh:
                 raise HTTP(403, u'Refreshing token is not allowed')
@@ -1387,24 +1384,24 @@ class AuthJWT(object):
             tokend = self.load_token(token)
             # verification can fail here
             refreshed = self.refresh_token(tokend)
-            ret = {'token':self.generate_token(refreshed)}
+            ret = {'token': self.generate_token(refreshed)}
         elif self.user_param in request.vars and self.pass_param in request.vars:
-            session.forget(response)
             username = request.vars[self.user_param]
             password = request.vars[self.pass_param]
             valid_user = self.auth.login_bare(username, password)
-            if valid_user:
-                payload = self.serialize_auth_session(current.session.auth)
-                self.alter_payload(payload)
-                ret = {'token':self.generate_token(payload)}
-            else:
-                raise HTTP(
-                    401, u'Not Authorized', 
-                    **{'WWW-Authenticate': u'JWT realm="%s"' % self.realm})
         else:
-            raise HTTP(400, u'Must pass token for refresh or username and password for login')
-        response.headers['content-type'] = 'application/json'
-        return json.dumps(ret)
+            valid_user = self.auth.user
+        if valid_user:
+            payload = self.serialize_auth_session(current.session.auth)
+            self.alter_payload(payload)
+            ret = {'token': self.generate_token(payload)}
+        elif ret is None:
+            raise HTTP(401,
+                       u'Not Authorized - need to be logged in, to pass a token '
+                       u'for refresh or username and password for login',
+                       **{'WWW-Authenticate': u'JWT realm="%s"' % self.realm})
+        response.headers['Content-Type'] = 'application/json'
+        return serializers.json(ret)
 
     def inject_token(self, tokend):
         """
@@ -1455,9 +1452,9 @@ class Auth(object):
         everybody_group_id=None,
         manager_actions={},
         auth_manager_role=None,
-        two_factor_authentication_group = None,
-        auth_two_factor_enabled = False,
-        auth_two_factor_tries_left = 3,
+        two_factor_authentication_group=None,
+        auth_two_factor_enabled=False,
+        auth_two_factor_tries_left=3,
         login_captcha=None,
         register_captcha=None,
         pre_registration_div=None,
@@ -1474,7 +1471,7 @@ class Auth(object):
         on_failed_authentication=lambda x: redirect(x),
         formstyle=None,
         label_separator=None,
-        logging_enabled = True,
+        logging_enabled=True,
         allow_delete_accounts=False,
         password_field='password',
         table_user_name='auth_user',
@@ -1716,19 +1713,39 @@ class Auth(object):
             args = []
         if vars is None:
             vars = {}
+        host = scheme and self.settings.host
         return URL(c=self.settings.controller,
-                   f=f, args=args, vars=vars, scheme=scheme)
+                   f=f, args=args, vars=vars, scheme=scheme, host=host)
 
     def here(self):
         return URL(args=current.request.args, vars=current.request.get_vars)
+
+    def select_host(self, host, host_names=None):
+        """
+        checks that host is valid, i.e. in the list of glob host_names
+        if the host is missing, then is it selects the first entry from host_names
+        read more here: https://github.com/web2py/web2py/issues/1196
+        """
+        if host:
+            if host_names:
+                for item in host_names:
+                    if fnmatch.fnmatch(host, item):
+                        break
+                else:
+                    raise HTTP(403, "Invalid Hostname")
+        elif host_names:
+            host = host_names[0]
+        else:
+            host = 'localhost'
+        return host
 
     def __init__(self, environment=None, db=None, mailer=True,
                  hmac_key=None, controller='default', function='user',
                  cas_provider=None, signature=True, secure=False,
                  csrf_prevention=True, propagate_extension=None,
-                 url_index=None, jwt=None):
+                 url_index=None, jwt=None, host_names=None):
 
-        ## next two lines for backward compatibility
+        # next two lines for backward compatibility
         if not db and environment and isinstance(environment, DAL):
             db = environment
         self.db = db
@@ -1765,13 +1782,14 @@ class Auth(object):
 
         url_index = url_index or URL(controller, 'index')
         url_login = URL(controller, function, args='login',
-                        extension = propagate_extension)
+                        extension=propagate_extension)
         # ## what happens after registration?
 
         settings = self.settings = Settings()
-        settings.update(Auth.default_settings)
+        settings.update(Auth.default_settings)        
+        host = self.select_host(request.env.http_host, host_names)
         settings.update(
-            cas_domains=[request.env.http_host],
+            cas_domains=[host],
             enable_tokens=False,
             cas_provider=cas_provider,
             cas_actions=dict(login='login',
@@ -1819,8 +1837,9 @@ class Auth(object):
             hmac_key=hmac_key,
             formstyle=current.response.formstyle,
             label_separator=current.response.form_label_separator,
-            two_factor_methods = [],
-            two_factor_onvalidation = [],
+            two_factor_methods=[],
+            two_factor_onvalidation=[],
+            host=host,
         )
         settings.lock_keys = True
         # ## these are messages that can be customized
@@ -1846,7 +1865,6 @@ class Auth(object):
             self.define_signature()
         else:
             self.signature = None
-        
         self.jwt_handler = jwt and AuthJWT(self, **jwt)
 
     def get_vars_next(self):
@@ -1916,7 +1934,7 @@ class Auth(object):
                        'reset_password', 'request_reset_password',
                        'change_password', 'profile', 'groups',
                        'impersonate', 'not_authorized', 'confirm_registration',
-                       'bulk_register','manage_tokens','jwt'):
+                       'bulk_register', 'manage_tokens', 'jwt'):
             if len(request.args) >= 2 and args[0] == 'impersonate':
                 return getattr(self, args[0])(request.args[1])
             else:
@@ -1931,7 +1949,7 @@ class Auth(object):
             elif args(1) == self.settings.cas_actions['proxyvalidate']:
                 return self.cas_validate(version=2, proxy=True)
             elif args(1) == self.settings.cas_actions['logout']:
-                return self.logout(next=request.vars.service or DEFAULT)        
+                return self.logout(next=request.vars.service or DEFAULT)
         else:
             raise HTTP(404)
 
@@ -1958,10 +1976,8 @@ class Auth(object):
         else:
             next = '?_next=' + urllib.quote(URL(args=request.args,
                                                 vars=request.get_vars))
-        href = lambda function: '%s/%s%s' % (action, function, next
-                                             if referrer_actions is DEFAULT
-                                             or function in referrer_actions
-                                             else '')
+        href = lambda function: \
+            '%s/%s%s' % (action, function, next if referrer_actions is DEFAULT or function in referrer_actions else '')
         if isinstance(prefix, str):
             prefix = T(prefix)
         if prefix:
@@ -1974,9 +1990,7 @@ class Auth(object):
         if self.user_id:  # User is logged in
             logout_next = self.settings.logout_next
             items.append({'name': T('Log Out'),
-                          'href': '%s/logout?_next=%s' % (action,
-                                                          urllib.quote(
-                                                          logout_next)),
+                          'href': '%s/logout?_next=%s' % (action, urllib.quote(logout_next)),
                           'icon': 'icon-off'})
             if 'profile' not in self.settings.actions_disabled:
                 items.append({'name': T('Profile'), 'href': href('profile'),
@@ -2009,8 +2023,8 @@ class Auth(object):
             if (self.settings.use_username and not
                     'retrieve_username' in self.settings.actions_disabled):
                 items.append({'name': T('Forgot username?'),
-                             'href': href('retrieve_username'),
-                             'icon': 'icon-edit'})
+                              'href': href('retrieve_username'),
+                              'icon': 'icon-edit'})
 
         def menu():  # For inclusion in MENU
             self.bar = [(items[0]['name'], False, items[0]['href'], [])]
@@ -2130,11 +2144,11 @@ class Auth(object):
             if self.user_id:
                 self.bar = SPAN(prefix, user_identifier, s1,
                                 Anr(items[0]['name'],
-                                _href=items[0]['href']), s3,
+                                    _href=items[0]['href']), s3,
                                 _class='auth_navbar')
             else:
                 self.bar = SPAN(s1, Anr(items[0]['name'],
-                                _href=items[0]['href']), s3,
+                                        _href=items[0]['href']), s3,
                                 _class='auth_navbar')
             for item in items[1:]:
                 self.bar.insert(-1, s2)
@@ -2191,11 +2205,10 @@ class Auth(object):
             if ('id' in fieldnames and
                 'modified_on' in fieldnames and
                 not current_record in fieldnames):
-                table._enable_record_versioning(
-                    archive_db=archive_db,
-                    archive_name=archive_names,
-                    current_record=current_record,
-                    current_record_label=current_record_label)
+                table._enable_record_versioning(archive_db=archive_db,
+                                                archive_name=archive_names,
+                                                current_record=current_record,
+                                                current_record_label=current_record_label)
 
     def define_signature(self):
         db = self.db
@@ -2459,13 +2472,11 @@ class Auth(object):
                     settings.table_token_name,
                     Field('user_id', reference_table_user, default=None,
                           label=self.messages.label_user_id),
-                    Field('expires_on', 'datetime', default=datetime.datetime(2999,12,31)),
-                    Field('token',writable=False,default=web2py_uuid,unique=True),
+                    Field('expires_on', 'datetime', default=datetime.datetime(2999, 12, 31)),
+                    Field('token', writable=False, default=web2py_uuid, unique=True),
                     *extra_fields,
-                    **dict(
-                        migrate=self.__get_migrate(
-                            settings.table_token_name, migrate),
-                        fake_migrate=fake_migrate))
+                    **dict(migrate=self.__get_migrate(settings.table_token_name, migrate),
+                           fake_migrate=fake_migrate))
         if not db._lazy_tables:
             settings.table_user = db[settings.table_user_name]
             settings.table_group = db[settings.table_group_name]
@@ -2516,9 +2527,7 @@ class Auth(object):
         # log messages should not be translated
         if type(description).__name__ == 'lazyT':
             description = description.m
-        self.table_event().insert(
-            description=str(description % vars),
-            origin=origin, user_id=user_id)
+        self.table_event().insert(description=str(description % vars), origin=origin, user_id=user_id)
 
     def get_or_create_user(self, keys, update_fields=['email'],
                            login=True, get=True):
@@ -2560,22 +2569,21 @@ class Auth(object):
                     update_keys[key] = keys[key]
             user.update_record(**update_keys)
         elif checks:
-            if not 'first_name' in keys and 'first_name' in table_user.fields:
+            if 'first_name' not in keys and 'first_name' in table_user.fields:
                 guess = keys.get('email', 'anonymous').split('@')[0]
                 keys['first_name'] = keys.get('username', guess)
-            form = table_user._filter_fields(keys)
-            user_id = table_user.insert(**form)
+            vars = table_user._filter_fields(keys)
+            user_id = table_user.insert(**vars)
             user = table_user[user_id]
             if self.settings.create_user_groups:
-                group_id = self.add_group(
-                    self.settings.create_user_groups % user)
+                group_id = self.add_group(self.settings.create_user_groups % user)
                 self.add_membership(group_id, user_id)
             if self.settings.everybody_group_id:
                 self.add_membership(self.settings.everybody_group_id, user_id)
             if login:
                 self.user = user
             if self.settings.register_onaccept:
-                callback(self.settings.register_onaccept, form)
+                callback(self.settings.register_onaccept, Storage(vars=user))
         return user
 
     def basic(self, basic_auth_realm=False):
@@ -2683,8 +2691,7 @@ class Auth(object):
             fields[settings.passfield] = \
                 settings.table_user[settings.passfield].validate(fields[settings.passfield])[0]
         if not fields.get(settings.userfield):
-            raise ValueError('register_bare: ' +
-                             'userfield not provided or invalid')
+            raise ValueError('register_bare: userfield not provided or invalid')
         user = self.get_or_create_user(fields, login=False, get=False,
                                        update_fields=self.settings.update_fields)
         if not user:
@@ -2735,7 +2742,7 @@ class Auth(object):
             redirect(session._cas_service)
 
         def cas_onaccept(form, onaccept=onaccept):
-            if not onaccept is DEFAULT:
+            if onaccept is not DEFAULT:
                 onaccept(form)
             return allow_access(interactivelogin=True)
         return self.login(next, onvalidation, cas_onaccept, log)
@@ -2822,14 +2829,14 @@ class Auth(object):
         response = current.response
         session = current.session
 
-        ### use session for federated login
+        # use session for federated login
         snext = self.get_vars_next()
 
         if snext:
             session._auth_next = snext
         elif session._auth_next:
             snext = session._auth_next
-        ### pass
+        # pass
 
         if next is DEFAULT:
             # important for security
@@ -2935,7 +2942,7 @@ class Auth(object):
                                )
 
                 captcha = settings.login_captcha or \
-                    (settings.login_captcha != False and settings.captcha)
+                    (settings.login_captcha is not False and settings.captcha)
                 if captcha:
                     addrow(form, captcha.label, captcha, captcha.comment,
                            settings.formstyle, 'captcha__row')
@@ -2956,15 +2963,14 @@ class Auth(object):
                         user = table_user(**{username: entered_username})
                     if user:
                         # user in db, check if registration pending or disabled
-                        temp_user = user                        
+                        temp_user = user
                         if (temp_user.registration_key or '').startswith('pending'):
                             response.flash = self.messages.registration_pending
                             return form
                         elif temp_user.registration_key in ('disabled', 'blocked'):
                             response.flash = self.messages.login_disabled
                             return form
-                        elif (temp_user.registration_key is not None
-                              and temp_user.registration_key.strip()):
+                        elif (temp_user.registration_key is not None and temp_user.registration_key.strip()):
                             response.flash = \
                                 self.messages.registration_verifying
                             return form
@@ -3075,7 +3081,7 @@ class Auth(object):
                         subject=self.messages.retrieve_two_factor_code_subject,
                         message=self.messages.retrieve_two_factor_code.format(session.auth_two_factor))
                 else:
-                    #Check for all method. It is possible to have multiples
+                    # Check for all method. It is possible to have multiples
                     for two_factor_method in two_factor_methods:
                         try:
                             # By default we use session.auth_two_factor generated before.
@@ -3089,8 +3095,6 @@ class Auth(object):
                             formname='login', dbio=False,
                             onvalidation=onvalidation,
                             hideerror=settings.hideerror):
-                accepted_form = True
-
                 accepted_form = True
 
                 '''
@@ -3236,11 +3240,15 @@ class Auth(object):
                 next = cas.logout_url(next)
 
         current.session.auth = None
+        self.user = None
         if self.settings.renew_session_onlogout:
             current.session.renew(clear_session=not self.settings.keep_session_onlogout)
         current.session.flash = self.messages.logged_out
         if next is not None:
             redirect(next)
+
+    def logout_bare(self):
+        self.logout(next=None, onlogout=None, log=None)
 
     def register(self,
                  next=DEFAULT,
@@ -3293,7 +3301,7 @@ class Auth(object):
 
         passfield = self.settings.password_field
         formstyle = self.settings.formstyle
-        try: # Make sure we have our original minimum length as other auth forms change it
+        try:  # Make sure we have our original minimum length as other auth forms change it
             table_user[passfield].requires[-1].min_length = self.settings.password_min_length
         except:
             pass
@@ -3301,7 +3309,7 @@ class Auth(object):
         if self.settings.register_verify_password:
             if self.settings.register_fields is None:
                 self.settings.register_fields = [f.name for f in table_user if f.writable]
-                k = self.settings.register_fields.index("password")
+                k = self.settings.register_fields.index(passfield)
                 self.settings.register_fields.insert(k+1, "password_two")
             extra_fields = [
                 Field("password_two", "password",
@@ -3334,7 +3342,7 @@ class Auth(object):
 
         key = web2py_uuid()
         if self.settings.registration_requires_approval:
-            key = 'pending-'+key
+            key = 'pending-' + key
 
         table_user.registration_key.default = key
         if form.accepts(request, session if self.csrf_prevention else None,
@@ -3343,12 +3351,10 @@ class Auth(object):
                         hideerror=self.settings.hideerror):
             description = self.messages.group_description % form.vars
             if self.settings.create_user_groups:
-                group_id = self.add_group(
-                    self.settings.create_user_groups % form.vars, description)
+                group_id = self.add_group(self.settings.create_user_groups % form.vars, description)
                 self.add_membership(group_id, form.vars.id)
             if self.settings.everybody_group_id:
-                self.add_membership(
-                    self.settings.everybody_group_id, form.vars.id)
+                self.add_membership(self.settings.everybody_group_id, form.vars.id)
             if self.settings.registration_requires_verification:
                 link = self.url(
                     self.settings.function, args=('verify_email', key), scheme=True)
@@ -3366,8 +3372,7 @@ class Auth(object):
                not self.settings.registration_requires_verification:
                 table_user[form.vars.id] = dict(registration_key='pending')
                 session.flash = self.messages.registration_pending
-            elif (not self.settings.registration_requires_verification or
-                      self.settings.login_after_registration):
+            elif (not self.settings.registration_requires_verification or self.settings.login_after_registration):
                 if not self.settings.registration_requires_verification:
                     table_user[form.vars.id] = dict(registration_key='')
                 session.flash = self.messages.registration_successful
@@ -3445,7 +3450,7 @@ class Auth(object):
         response = current.response
         session = current.session
         captcha = self.settings.retrieve_username_captcha or \
-                  (self.settings.retrieve_username_captcha != False and self.settings.captcha)
+                  (self.settings.retrieve_username_captcha is not False and self.settings.captcha)
         if not self.settings.mailer:
             response.flash = self.messages.function_disabled
             return ''
@@ -3603,7 +3608,7 @@ class Auth(object):
 
         if self.settings.prevent_password_reset_attacks:
             key = request.vars.key
-            if not key and len(request.args)>1:
+            if not key and len(request.args) > 1:
                 key = request.args[-1]
             if key:
                 session._reset_password_key = key
@@ -3713,7 +3718,7 @@ class Auth(object):
     def manage_tokens(self):
         if not self.user:
             redirect(self.settings.login_url)
-        table_token =self.table_token()
+        table_token = self.table_token()
         table_token.user_id.writable = False
         table_token.user_id.default = self.user.id
         table_token.token.writable = False
@@ -3759,7 +3764,7 @@ class Auth(object):
         except Exception:
             session.flash = self.messages.invalid_reset_password
             redirect(next, client_side=self.settings.client_side)
-        
+
         key = user.registration_key
         if key in ('pending', 'disabled', 'blocked') or (key or '').startswith('pending'):
             session.flash = self.messages.registration_pending
@@ -3777,8 +3782,7 @@ class Auth(object):
                   requires=self.table_user()[passfield].requires),
             Field('new_password2', 'password',
                   label=self.messages.verify_password,
-                  requires=[IS_EXPR(
-                      'value==%s' % repr(request.vars.new_password),
+                  requires=[IS_EXPR('value==%s' % repr(request.vars.new_password),
                                     self.messages.mismatched_password)]),
             submit_button=self.messages.password_reset_button,
             hidden=dict(_next=next),
@@ -3812,7 +3816,7 @@ class Auth(object):
         response = current.response
         session = current.session
         captcha = self.settings.retrieve_password_captcha or \
-                (self.settings.retrieve_password_captcha != False and self.settings.captcha)
+                (self.settings.retrieve_password_captcha is not False and self.settings.captcha)
 
         if next is DEFAULT:
             next = self.get_vars_next() or self.settings.request_reset_password_next
@@ -3857,8 +3861,8 @@ class Auth(object):
                         formname='reset_password', dbio=False,
                         onvalidation=onvalidation,
                         hideerror=self.settings.hideerror):
-            user = table_user(**{userfield:form.vars.get(userfield)})
-            key = user.registration_key 
+            user = table_user(**{userfield: form.vars.get(userfield)})
+            key = user.registration_key
             if not user:
                 session.flash = self.messages['invalid_%s' % userfield]
                 redirect(self.url(args=request.args),
@@ -4045,18 +4049,18 @@ class Auth(object):
     def jwt(self):
         """
         To use JWT authentication:
-        1) instantiate auth with
+        1) instantiate auth with::
 
             auth = Auth(db, jwt = {'secret_key':'secret'})
 
-        where 'secret' is your own secret string. 
+        where 'secret' is your own secret string.
 
-        2) Secorate functions that require login but should accept the JWT token credentials:
+        2) Decorate functions that require login but should accept the JWT token credentials::
 
             @auth.allows_jwt()
             @auth.requires_login()
             def myapi(): return 'hello %s' % auth.user.email
-    
+
         Notice jwt is allowed but not required. if user is logged in, myapi is accessible.
 
         3) Use it!
@@ -4074,7 +4078,7 @@ class Auth(object):
 
             Authorization: Bearer <the jwt token>
 
-        Any additional attributes in the jwt argument of Auth() below:
+        Any additional attributes in the jwt argument of Auth() below::
 
            auth = Auth(db, jwt = {...})
 
@@ -4083,9 +4087,9 @@ class Auth(object):
         if not self.jwt_handler:
             raise HTTP(400, "Not authorized")
         else:
-            current.response.headers['content-type'] = 'application/json'
-            raise HTTP(200, self.jwt_handler.jwt_token_manager())
-        
+            rtn = self.jwt_handler.jwt_token_manager()
+            raise HTTP(200, rtn, cookies=None, **current.response.headers)
+
     def is_impersonating(self):
         return self.is_logged_in() and 'impersonator' in current.session.auth
 
@@ -4109,6 +4113,7 @@ class Auth(object):
             raise HTTP(401, "Not Authorized")
         current_id = auth.user.id
         requested_id = user_id
+        user = None
         if user_id is DEFAULT:
             user_id = current.request.post_vars.user_id
         if user_id and user_id != self.user.id and user_id != '0':
@@ -4137,7 +4142,10 @@ class Auth(object):
             return None
         if requested_id is DEFAULT and not request.post_vars:
             return SQLFORM.factory(Field('user_id', 'integer'))
-        return SQLFORM(table_user, user.id, readonly=True)
+        elif not user:
+            return None
+        else:
+            return SQLFORM(table_user, user.id, readonly=True)
 
     def update_groups(self):
         if not self.user:
@@ -4188,7 +4196,7 @@ class Auth(object):
         if not self.jwt_handler:
             raise HTTP(400, "Not authorized")
         else:
-            return self.jwt_handler.allows_jwt()
+            return self.jwt_handler.allows_jwt(otherwise=otherwise)
 
     def requires(self, condition, requires_login=True, otherwise=None):
         """
@@ -4201,7 +4209,6 @@ class Auth(object):
 
                 basic_allowed, basic_accepted, user = self.basic()
                 user = user or self.user
-
                 login_required = requires_login
                 if callable(login_required):
                     login_required = login_required()
@@ -4210,7 +4217,7 @@ class Auth(object):
                     if not user:
                         if current.request.ajax:
                             raise HTTP(401, self.messages.ajax_failed_authentication)
-                        elif not otherwise is None:
+                        elif otherwise is not None:
                             if callable(otherwise):
                                 return otherwise()
                             redirect(otherwise)
@@ -4220,10 +4227,8 @@ class Auth(object):
                         else:
                             next = self.here()
                             current.session.flash = current.response.flash
-                            return call_or_redirect(
-                                self.settings.on_failed_authentication,
-                                self.settings.login_url +
-                                    '?_next=' + urllib.quote(next))
+                            return call_or_redirect(self.settings.on_failed_authentication,
+                                                    self.settings.login_url + '?_next=' + urllib.quote(next))
 
                 if callable(condition):
                     flag = condition()
@@ -4248,7 +4253,7 @@ class Auth(object):
         return self.requires(True, otherwise=otherwise)
 
     def requires_login_or_token(self, otherwise=None):
-        if self.settings.enable_tokens == True:
+        if self.settings.enable_tokens is True:
             user = None
             request = current.request
             token = request.env.http_web2py_user_token or request.vars._token
@@ -4304,11 +4309,8 @@ class Auth(object):
         """
         Creates a group associated to a role
         """
-
-        group_id = self.table_group().insert(
-            role=role, description=description)
-        self.log_event(self.messages['add_group_log'],
-                       dict(group_id=group_id, role=role))
+        group_id = self.table_group().insert(role=role, description=description)
+        self.log_event(self.messages['add_group_log'], dict(group_id=group_id, role=role))
         return group_id
 
     def del_group(self, group_id):
@@ -4318,7 +4320,8 @@ class Auth(object):
         self.db(self.table_group().id == group_id).delete()
         self.db(self.table_membership().group_id == group_id).delete()
         self.db(self.table_permission().group_id == group_id).delete()
-        if group_id in self.user_groups: del self.user_groups[group_id]
+        if group_id in self.user_groups:
+            del self.user_groups[group_id]
         self.log_event(self.messages.del_group_log, dict(group_id=group_id))
 
     def id_group(self, role):
@@ -4350,7 +4353,6 @@ class Auth(object):
         """
         Checks if user is member of group_id or role
         """
-
         group_id = group_id or self.id_group(role)
         try:
             group_id = int(group_id)
@@ -4359,8 +4361,8 @@ class Auth(object):
         if not user_id and self.user:
             user_id = self.user.id
         membership = self.table_membership()
-        if group_id and user_id and self.db((membership.user_id == user_id)
-                    & (membership.group_id == group_id)).select():
+        if group_id and user_id and self.db((membership.user_id == user_id) &
+                                            (membership.group_id == group_id)).select():
             r = True
         else:
             r = False
@@ -4383,8 +4385,8 @@ class Auth(object):
             user_id = self.user.id
         membership = self.table_membership()
         db = membership._db
-        record = db((membership.user_id==user_id)&
-                    (membership.group_id==group_id),
+        record = db((membership.user_id == user_id) &
+                    (membership.group_id == group_id),
                     ignore_common_filters=True).select().first()
         if record:
             if hasattr(record, 'is_active') and not record.is_active:
@@ -4407,15 +4409,18 @@ class Auth(object):
         """
 
         group_id = group_id or self.id_group(role)
+        try:
+            group_id = int(group_id)
+        except:
+            group_id = self.id_group(group_id)  # interpret group_id as a role
         if not user_id and self.user:
             user_id = self.user.id
         membership = self.table_membership()
         self.log_event(self.messages['del_membership_log'],
                        dict(user_id=user_id, group_id=group_id))
-        ret = self.db(membership.user_id
-                      == user_id)(membership.group_id
-                                  == group_id).delete()
-        if group_id in self.user_groups: del self.user_groups[group_id]
+        ret = self.db(membership.user_id == user_id)(membership.group_id == group_id).delete()
+        if group_id in self.user_groups:
+            del self.user_groups[group_id]
         return ret
 
     def has_permission(self,
@@ -4432,34 +4437,32 @@ class Auth(object):
         """
 
         if not group_id and self.settings.everybody_group_id and \
-                self.has_permission(
-            name, table_name, record_id, user_id=None,
-            group_id=self.settings.everybody_group_id):
+                self.has_permission(name, table_name, record_id, user_id=None,
+                                    group_id=self.settings.everybody_group_id):
                 return True
 
         if not user_id and not group_id and self.user:
             user_id = self.user.id
         if user_id:
             membership = self.table_membership()
-            rows = self.db(membership.user_id
-                           == user_id).select(membership.group_id)
+            rows = self.db(membership.user_id == user_id).select(membership.group_id)
             groups = set([row.group_id for row in rows])
             if group_id and group_id not in groups:
                 return False
         else:
             groups = set([group_id])
         permission = self.table_permission()
-        rows = self.db(permission.name == name)(permission.table_name
-                 == str(table_name))(permission.record_id
-                 == record_id).select(permission.group_id)
+        rows = self.db(permission.name ==
+                       name)(permission.table_name ==
+                             str(table_name))(permission.record_id ==
+                                              record_id).select(permission.group_id)
         groups_required = set([row.group_id for row in rows])
         if record_id:
-            rows = self.db(permission.name
-                            == name)(permission.table_name
-                     == str(table_name))(permission.record_id
-                     == 0).select(permission.group_id)
-            groups_required = groups_required.union(set([row.group_id
-                    for row in rows]))
+            rows = self.db(permission.name ==
+                           name)(permission.table_name ==
+                                 str(table_name))(permission.record_id ==
+                                                  0).select(permission.group_id)
+            groups_required = groups_required.union(set([row.group_id for row in rows]))
         if groups.intersection(groups_required):
             r = True
         else:
@@ -4483,14 +4486,14 @@ class Auth(object):
         permission = self.table_permission()
         if group_id == 0:
             group_id = self.user_group()
-        record = self.db((permission.group_id == group_id)&
-                         (permission.name == name)&
-                         (permission.table_name == str(table_name))&
+        record = self.db((permission.group_id == group_id) &
+                         (permission.name == name) &
+                         (permission.table_name == str(table_name)) &
                          (permission.record_id == long(record_id)),
-                          ignore_common_filters=True).select(
-            limitby=(0, 1), orderby_on_limitby=False).first()
+                         ignore_common_filters=True
+                         ).select(limitby=(0, 1), orderby_on_limitby=False).first()
         if record:
-            if hasattr(record, 'is_active') and not record.is_ctive:
+            if hasattr(record, 'is_active') and not record.is_active:
                 record.update_record(is_active=True)
             id = record.id
         else:
@@ -4517,10 +4520,11 @@ class Auth(object):
         self.log_event(self.messages['del_permission_log'],
                        dict(group_id=group_id, name=name,
                             table_name=table_name, record_id=record_id))
-        return self.db(permission.group_id == group_id)(permission.name
-                 == name)(permission.table_name
-                           == str(table_name))(permission.record_id
-                 == long(record_id)).delete()
+        return self.db(permission.group_id ==
+                       group_id)(permission.name ==
+                                 name)(permission.table_name ==
+                                       str(table_name))(permission.record_id ==
+                                                        long(record_id)).delete()
 
     def accessible_query(self, name, table, user_id=None):
         """
@@ -4547,10 +4551,9 @@ class Auth(object):
                 cquery = table
             tablenames = db._adapter.tables(cquery)
             for tablename in tablenames:
-                cquery &= self.accessible_query(name, tablename,
-                                                user_id=user_id)
+                cquery &= self.accessible_query(name, tablename, user_id=user_id)
             return cquery
-        if not isinstance(table, str) and\
+        if not isinstance(table, str) and \
                 self.has_permission(name, table, 0, user_id):
             return table.id > 0
         membership = self.table_membership()
@@ -4579,11 +4582,11 @@ class Auth(object):
         If you have a table (db.mytable) that needs full revision history you
         can just do::
 
-            form=crud.update(db.mytable,myrecord,onaccept=auth.archive)
+            form = crud.update(db.mytable, myrecord, onaccept=auth.archive)
 
         or::
 
-            form=SQLFORM(db.mytable,myrecord).process(onaccept=auth.archive)
+            form = SQLFORM(db.mytable, myrecord).process(onaccept=auth.archive)
 
         crud.archive will define a new table "mytable_archive" and store
         a copy of the current record (if archive_current=True)
@@ -4597,18 +4600,18 @@ class Auth(object):
         in a model::
 
             db.define_table('mytable_archive',
-                Field('current_record',db.mytable),
-                db.mytable)
+                            Field('current_record', db.mytable),
+                            db.mytable)
 
         Notice such table includes all fields of db.mytable plus one: current_record.
         crud.archive does not timestamp the stored record unless your original table
         has a fields like::
 
             db.define_table(...,
-                Field('saved_on','datetime',
-                     default=request.now,update=request.now,writable=False),
-                Field('saved_by',auth.user,
-                     default=auth.user_id,update=auth.user_id,writable=False),
+                Field('saved_on', 'datetime',
+                      default=request.now, update=request.now, writable=False),
+                Field('saved_by', auth.user,
+                      default=auth.user_id, update=auth.user_id, writable=False),
 
         there is nothing special about these fields since they are filled before
         the record is archived.
@@ -4617,15 +4620,14 @@ class Auth(object):
         you can do, for example::
 
             db.define_table('myhistory',
-                Field('parent_record',db.mytable),
-                db.mytable)
+                Field('parent_record', db.mytable), db.mytable)
 
         and use it as::
 
-            form=crud.update(db.mytable,myrecord,
-                             onaccept=lambda form:crud.archive(form,
-                             archive_table=db.myhistory,
-                             current_record='parent_record'))
+            form = crud.update(db.mytable, myrecord,
+                               onaccept=lambda form:crud.archive(form,
+                                                                 archive_table=db.myhistory,
+                                                                 current_record='parent_record'))
 
         """
         if not archive_current and not form.record:
@@ -4633,7 +4635,7 @@ class Auth(object):
         table = form.table
         if not archive_table:
             archive_table_name = '%s_archive' % table
-            if not archive_table_name in table._db:
+            if archive_table_name not in table._db:
                 table._db.define_table(
                     archive_table_name,
                     Field(current_record, table),
@@ -4888,18 +4890,16 @@ class Crud(object):
         self.deleted = False
         captcha = self.settings.update_captcha or self.settings.captcha
         if record and captcha:
-            addrow(form, captcha.label, captcha, captcha.comment,
-                         self.settings.formstyle, 'captcha__row')
+            addrow(form, captcha.label, captcha, captcha.comment, self.settings.formstyle, 'captcha__row')
         captcha = self.settings.create_captcha or self.settings.captcha
         if not record and captcha:
-            addrow(form, captcha.label, captcha, captcha.comment,
-                         self.settings.formstyle, 'captcha__row')
+            addrow(form, captcha.label, captcha, captcha.comment, self.settings.formstyle, 'captcha__row')
         if request.extension not in ('html', 'load'):
             (_session, _formname) = (None, None)
         else:
             (_session, _formname) = (
                 session, '%s/%s' % (table._tablename, form.record_id))
-        if not formname is DEFAULT:
+        if formname is not DEFAULT:
             _formname = formname
         keepvalues = self.settings.keepvalues
         if request.vars.delete_this_record:
@@ -5188,7 +5188,7 @@ class Crud(object):
                     elif validate:
                         value, error = field.validate(txtval)
                         if not error:
-                            ### TODO deal with 'starts with', 'ends with', 'contains' on GAE
+                            # TODO deal with 'starts with', 'ends with', 'contains' on GAE
                             query &= self.get_query(field, opval, value)
                         else:
                             row[3].append(DIV(error, _class='error'))
@@ -5201,7 +5201,7 @@ class Crud(object):
                 results = db(query).select(*selected, **attributes)
                 for r in refsearch:
                     results = results.find(r)
-            except:  # hmmm, we should do better here
+            except:  # TODO: hmmm, we should do better here
                 results = None
         return form, results
 
@@ -5213,7 +5213,7 @@ def fetch(url, data=None, headers=None,
           cookie=Cookie.SimpleCookie(),
           user_agent='Mozilla/5.0'):
     headers = headers or {}
-    if not data is None:
+    if data is not None:
         data = urllib.urlencode(data)
     if user_agent:
         headers['User-agent'] = user_agent
@@ -5676,12 +5676,12 @@ class Service(object):
         methods = self.jsonrpc_procedures
         data = json_parser.loads(request.body.read())
         jsonrpc_2 = data.get('jsonrpc')
-        if jsonrpc_2: #hand over to version 2 of the protocol
+        if jsonrpc_2:  # hand over to version 2 of the protocol
             return self.serve_jsonrpc2(data)
         id, method, params = data.get('id'), data.get('method'), data.get('params', [])
         if id is None:
             return return_error(0, 100, 'missing id')
-        if not method in methods:
+        if method not in methods:
             return return_error(id, 100, 'method "%s" does not exist' % method)
         try:
             if isinstance(params, dict):
@@ -5705,8 +5705,7 @@ class Service(object):
         def return_response(id, result):
             if not must_respond:
                 return None
-            return serializers.json({'jsonrpc': '2.0',
-                'id': id, 'result': result})
+            return serializers.json({'jsonrpc': '2.0', 'id': id, 'result': result})
 
         def return_error(id, code, message=None, data=None):
             error = {'code': code}
@@ -5717,9 +5716,7 @@ class Service(object):
                 error['message'] = message
             if data is not None:
                 error['data'] = data
-            return serializers.json({'jsonrpc': '2.0',
-                                     'id': id,
-                                     'error': error})
+            return serializers.json({'jsonrpc': '2.0', 'id': id, 'error': error})
 
         def validate(data):
             """
@@ -5779,7 +5776,7 @@ class Service(object):
             return return_error(None, e.code, e.info)
 
         id, method, params = data.get('id'), data['method'], data.get('params', '')
-        if not method in methods:
+        if method not in methods:
             return return_error(id, -32601, data='Method "%s" does not exist' % method)
         try:
             if isinstance(params, dict):
@@ -5885,7 +5882,7 @@ class Service(object):
                     UL(LI("Location: %s" % dispatcher.location),
                        LI("Namespace: %s" % dispatcher.namespace),
                        LI("SoapAction: %s" % dispatcher.action),
-                    ),
+                       ),
                     H3("Sample SOAP XML Request Message:"),
                     CODE(sample_req_xml, language="xml"),
                     H3("Sample SOAP XML Response Message:"),
@@ -6019,7 +6016,7 @@ def prettydate(d, T=lambda x: x, utc=False):
         return T('1 year' + suffix)
     elif dt.days >= 60:
         return T('%d months' + suffix) % int(dt.days / 30)
-    elif dt.days > 21:
+    elif dt.days >= 27:  # 4 weeks ugly
         return T('1 month' + suffix)
     elif dt.days >= 14:
         return T('%d weeks' + suffix) % int(dt.days / 7)
@@ -6425,10 +6422,9 @@ class Wiki(object):
                 args += value['args']
                 db.define_table(key, *args, **value['vars'])
 
-        if self.settings.templates is None and not \
-           self.settings.manage_permissions:
-            self.settings.templates = db.wiki_page.tags.contains('template') & \
-                db.wiki_page.can_read.contains('everybody')
+        if self.settings.templates is None and not self.settings.manage_permissions:
+            self.settings.templates = \
+                db.wiki_page.tags.contains('template') & db.wiki_page.can_read.contains('everybody')
 
         def update_tags_insert(page, id, db=db):
             for tag in page.tags or []:
@@ -6451,8 +6447,10 @@ class Wiki(object):
             'wiki_editor' not in auth.user_groups.values() and
                 self.settings.groups == auth.user_groups.values()):
             group = db.auth_group(role='wiki_editor')
-            gid = group.id if group else db.auth_group.insert(
-                role='wiki_editor')
+            if group:
+                gid = group.id
+            else:
+                db.auth_group.insert(role='wiki_editor')
             auth.add_membership(gid)
 
         settings.lock_keys = True
@@ -6479,9 +6477,8 @@ class Wiki(object):
         groups = self.settings.groups
         return ('wiki_editor' in groups or
                 (page is None and 'wiki_author' in groups) or
-                not page is None and (
-                set(groups).intersection(set(page.can_edit)) or
-                page.created_by == self.auth.user.id))
+                page is not None and (set(groups).intersection(set(page.can_edit)) or
+                                      page.created_by == self.auth.user.id))
 
     def can_manage(self):
         if not self.auth.user:
@@ -6502,7 +6499,7 @@ class Wiki(object):
                     return True
         return False
 
-    ### END POLICY
+    # END POLICY
 
     def automenu(self):
         """adds the menu if not present"""
@@ -6720,20 +6717,15 @@ class Wiki(object):
         if self.settings.templates:
             fields.append(
                 Field("from_template", "reference wiki_page",
-                      requires=IS_EMPTY_OR(
-                                   IS_IN_DB(db(self.settings.templates),
-                                            db.wiki_page._id,
-                                            '%(slug)s')),
-                      comment=current.T(
-                        "Choose Template or empty for new Page")))
+                      requires=IS_EMPTY_OR(IS_IN_DB(db(self.settings.templates), db.wiki_page._id, '%(slug)s')),
+                      comment=current.T("Choose Template or empty for new Page")))
         form = SQLFORM.factory(*fields, **dict(_class="well"))
         form.element("[type=submit]").attributes["_value"] = \
             current.T("Create Page from Slug")
 
         if form.process().accepted:
-             form.vars.from_template = 0 if not form.vars.from_template \
-                 else form.vars.from_template
-             redirect(URL(args=('_edit', form.vars.slug, form.vars.from_template or 0)))  # added param
+            form.vars.from_template = 0 if not form.vars.from_template else form.vars.from_template
+            redirect(URL(args=('_edit', form.vars.slug, form.vars.from_template or 0)))  # added param
         return dict(content=form)
 
     def pages(self):
@@ -6824,25 +6816,25 @@ class Wiki(object):
                     mode = 0
                 if mode in (2, 3):
                     submenu.append((current.T('View Page'), None,
-                    URL(controller, function, args=slug)))
+                                    URL(controller, function, args=slug)))
                 if mode in (1, 3):
                     submenu.append((current.T('Edit Page'), None,
-                    URL(controller, function, args=('_edit', slug))))
+                                    URL(controller, function, args=('_edit', slug))))
                 if mode in (1, 2):
                     submenu.append((current.T('Edit Page Media'), None,
-                    URL(controller, function, args=('_editmedia', slug))))
+                                    URL(controller, function, args=('_editmedia', slug))))
 
             submenu.append((current.T('Create New Page'), None,
                             URL(controller, function, args=('_create'))))
             # Moved next if to inside self.auth.user check
             if self.can_manage():
                 submenu.append((current.T('Manage Pages'), None,
-                            URL(controller, function, args=('_pages'))))
+                                URL(controller, function, args=('_pages'))))
                 submenu.append((current.T('Edit Menu'), None,
-                            URL(controller, function, args=('_edit', 'wiki-menu'))))
+                                URL(controller, function, args=('_edit', 'wiki-menu'))))
             # Also moved inside self.auth.user check
             submenu.append((current.T('Search Pages'), None,
-                        URL(controller, function, args=('_search'))))
+                            URL(controller, function, args=('_search'))))
         return menu
 
     def search(self, tags=None, query=None, cloud=True, preview=True,
@@ -6860,7 +6852,7 @@ class Wiki(object):
             if request.vars.q:
                 tags = [v.strip() for v in request.vars.q.split(',')]
                 tags = [v.lower() for v in tags if v]
-        if tags or not query is None:
+        if tags or query is not None:
             db = self.auth.db
             count = db.wiki_tag.wiki_page.count()
             fields = [db.wiki_page.id, db.wiki_page.slug,
