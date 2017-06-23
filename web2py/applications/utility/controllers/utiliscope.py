@@ -260,7 +260,7 @@ def expire_hit():
     turk.expire_hit(request.args[0])
     redirect(URL(r=request, f='index'))
 def launch_one_off_hit():
-    assert sandboxp == sj.loads(request.vars.sandbox), \
+    assert sandboxp == fromjson(request.vars.sandbox), \
            'You need to reload that webpage, or reset the sandboxp variable!'
     launch_test_study(request.vars.task)
     debug("We added a hit to the launch queue.")
@@ -387,8 +387,8 @@ def dolores():
 
                 example_hit=example_hit,
 
-                data=sj.dumps(data),
-                histogram=sj.dumps(histogram),
+                data=tojson(data),
+                histogram=tojson(histogram),
 
                 pageloaders=pageloaders,
                 accepted_by=accepted_by,

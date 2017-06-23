@@ -12,19 +12,15 @@ from datetime import datetime, timedelta
 import traceback
 import types
 from dal import DAL
-import gluon.contrib.simplejson as json
+from gluon import serializers
+from botocore.exceptions import ClientError
 # import autoreload
 # autoreload.run()
 
 # Define constants
-AWS_ACCESS_KEY_ID = None
-AWS_SECRET_ACCESS_KEY = None
-SERVICE_NAME = 'AWSMechanicalTurkRequester'
-#SERVICE_VERSION = '2007-06-21'
-SERVICE_VERSION = '2008-04-01'
-
 SANDBOXP = False
 LOCAL_EXTERNAL_P = True
+BOTO_CLIENT = None
 
 
 
@@ -41,40 +37,6 @@ def generate_signature(service, operation, timestamp, secret_access_key):
     return my_b64_hmac_digest
 
 
-def ask_turk_raw(operation, args):
-    assert AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
-
-    # Calculate the request authentication parameters
-    timestamp = generate_timestamp(time.gmtime())
-    signature = generate_signature('AWSMechanicalTurkRequester', operation, timestamp, AWS_SECRET_ACCESS_KEY)
-
-    # Construct the request
-    parameters = {
-        'Service': SERVICE_NAME,
-        'Version': SERVICE_VERSION,
-        'AWSAccessKeyId': AWS_ACCESS_KEY_ID,
-        'Timestamp': timestamp,
-        'Signature': signature,
-        'Operation': operation
-        }
-
-    parameters.update(args)
-
-    # Make the request
-    if SANDBOXP:
-        url = 'https://mechanicalturk.sandbox.amazonaws.com/onca/xml?'
-    else:
-        url = 'https://mechanicalturk.amazonaws.com/onca/xml?'
-    result_xmlstr = urllib.urlopen(url, urllib.urlencode(parameters)).read()
-    return result_xmlstr
-
-def ask_turk(operation, args):
-    """
-    The main function everything uses.
-
-    Raises a TurkAPIError if shit goes down.
-    """
-    return xmlify(ask_turk_raw(operation, args))
 
 # ==================================
 #  Handling errors
@@ -183,88 +145,65 @@ def getsx(xmlobj, tagname):
 
 
 def balance():
-    return ask_turk('GetAccountBalance',{})
+    BOTO_CLIENT.get_account_balance()
 
 def print_balance():
-    pp(ask_turk('GetAccountBalance',{}))
+    pp(balance())
 
 def get_hit(hitid):
-    return ask_turk('GetHIT', {'HITId' : hitid})
+    try:
+        return BOTO_CLIENT.get_hit(HITId=hitid)['HIT']
+    except ClientError as e:
+        raise TurkAPIError(e)
 
-def hit_creation(hit):
-    time = get(hit, 'CreationTime')
-    if not time:
-        pp(hit)
-        raise Exception, 'This hit %s has no creation time' % gets(hit,'HITId')
-    tmp = time.split('T')
-    tmp[1] = tmp[1][:-1]
-    date = map(lambda x: int(x), tmp[0].split('-'))
-    time = map(lambda x: int(x), tmp[1].split(':'))
-    result = datetime(date[0], date[1], date[2], time[0], time[1], time[2])
-    return result
-
-def get_page(operation, page):
-    data = ask_turk(operation, {'PageSize' : 100, \
-                            'PageNumber' : page,\
-                            'SortProperty' : 'Enumeration'})
-    print 'Getting page ' + str(page) + ' with '\
-          + get(data, 'NumResults') + ' hits of '\
-          + get(data,'TotalNumResults')
-    return gets(data,'HITId')
-    
-def get_all_pages(operation):
+def get_all_pages(f):
     results = []
-    i = 1
+    next_token = None
     while True:
-        hits = get_page(operation, i)
-        if len(hits) == 0:
+        hits, next_token = f(next_token)
+        if len(hits) == 0 or next_token is None:
             break
         results += hits
-        i = i+1
     return results
-    
-def get_hits_to(startdate):
-    results = []
-    i = 1
-    while True:
-        hits = get_page(operation, i)
-        if len(hits) == 0 or False:
-            break
-        results += hits
-        i = i+1
-    return results
-    
+
 def get_all_hits ():
-    return get_all_pages('SearchHITs')
-
-recent_hits = []
-def load_recent_hits():
-    next_page = 1 + len(recent_hits)/100
-    recent_hits.extend(get_page('SearchHITs', next_page))
-    print "You've now loaded %s hits, dating back to %s" \
-          % (len(recent_hits),
-             str(hit_creation(get_hit(recent_hits[-1]))))
-
-##    data = ask_turk('SearchHITs', {'PageSize' : 100})
-##    return gets(data, 'HITId')
+    def f(next_token):
+        params = {}
+        if next_token is not None:
+            params['NextToken'] = next_token
+        result = BOTO_CLIENT.list_hits(**params)
+        return [e['HITId'] for e in result['HITs']], result.get('NextToken', None)
+    return get_all_pages(f)
 
 def get_reviewable_hit_ids ():
-    return get_all_pages('GetReviewableHITs')
+    def f(next_token):
+        params = {}
+        if next_token is not None:
+            params['NextToken'] = next_token
+        result = BOTO_CLIENT.list_reviewable_hits(**params)
+        return [e['HITId'] for e in result['HITs']], result.get('NextToken', None)
+    return get_all_pages(f)
 
 def get_assignments_for_hit(hitid):
-    data = ask_turk('GetAssignmentsForHIT', {
-        'HITId' : hitid,
-        'PageSize': 30
-    })
-    return getsx(data, 'Assignment')
+    def f(next_token):
+        params = {}
+        if next_token is not None:
+            params['NextToken'] = next_token
+        result = BOTO_CLIENT.list_assignments_for_hit(HITId=hitid, **params)
+        return result['Assignments'], result.get('NextToken', None)
+    try:
+        return get_all_pages(f)
+    except ClientError as e:
+        raise TurkAPIError(e)
 
 def get_worker_answers(hitid):
-     assignments = get_assignments_for_hit(hitid)
-     result = map(lambda ass:
-                  [ass.firstChild.firstChild.data,
-                   ass.getElementsByTagName('Answer')[0].firstChild.data],
-                  assignments)
-     return result
+    raise Exception("Not sure what this did. Doesn't work anymore")
+    assignments = get_assignments_for_hit(hitid)
+    result = map(lambda ass:
+                 [ass.firstChild.firstChild.data,
+                  ass.getElementsByTagName('Answer')[0].firstChild.data],
+                 assignments)
+    return result
     
 
 def is_valid(xmlobj):
@@ -272,7 +211,7 @@ def is_valid(xmlobj):
 
 def get_hit_status(hitid):
     hit = get_hit(hitid)
-    return is_valid(hit) and get(hit,'HITStatus')
+    return hit.get('HITStatus', None)
 
 def get_my_assignments ():
     return map(get_assignments_for_hit, get_all_hits())
@@ -282,13 +221,13 @@ def get_responses():
         print 'Processing hit ' + str(i) + ': ' + hit
         assignments = get_assignments_for_hit(hit)
         for ass in assignments:
-            state = get(ass,'AssignmentStatus')
+            state = ass['AssignmentStatus']
             if state == 'Rejected':
-                print '## skipping REJECTED assignment ' + get(ass,'AssignmentId')
+                print '## skipping REJECTED assignment ' + ass['AssignmentId']
             elif state == 'Submitted' or state == 'Approved':
-                answerText = get(ass,'Answer')
-                answerXML = xmlify(answerXML)
-                guesses = gets(answerXML, 'FreeText')
+                answerText = ass['Answer']
+                #answerXML = xmlify(answerXML)
+                #guesses = gets(answerXML, 'FreeText')
                 
             else:
                 print '###################### ERRRRROOOOOORRRRRRRR'
@@ -297,10 +236,9 @@ def get_responses():
 def bonus_total(ass_id):
     bonus_sum = 0.0
     bonuses = get_bonus_payments(ass_id)
-    if int(get(bonuses, 'NumResults')) > 0:
-        for bonus in gets(bonuses, 'Amount'):
-            #print ass_id + ' got a bonus of ' + str(float(bonus))
-            bonus_sum += float(bonus)
+    for bonus in bonuses:
+        #print ass_id + ' got a bonus of ' + str(float(bonus))
+        bonus_sum += float(bonus['BonusAmount'])
     return bonus_sum
 
 def give_bonus_up_to(assignmentid, workerid, bonusamt, reason):
@@ -322,27 +260,33 @@ def give_bonus(assignmentid, workerid, bonusamt, reason):
     FYI If this fails, it will raise an error, because xmlify()
     within ask_turk() runs error_check() which will raise an error
     and store it in the amazon_health_log.
+
+    UPDATE: Not sure if above still applies.
     '''
 
     params = {'AssignmentId' : assignmentid,
               'WorkerId' : workerid,
-              'BonusAmount.1.Amount' : bonusamt,
-              'BonusAmount.1.CurrencyCode' : 'USD',
+              'BonusAmount' : str(bonusamt),
               'Reason' : reason}
-    return ask_turk('GrantBonus', params)
+    return BOTO_CLIENT.send_bonus(**params)
 
 def get_bonus_payments(assignmentid):
-    params = {'AssignmentId' : assignmentid,
-              'PageSize' : 100}
-    return ask_turk('GetBonusPayments', params)
-
-
+    def f(next_token):
+        params = {}
+        if next_token is not None:
+            params['NextToken'] = next_token
+        result = BOTO_CLIENT.list_bonus_payments(AssignmentId=assignmentid, **params)
+        return result['BonusPayments'], result.get('NextToken', None)
+    try:
+        return get_all_pages(f)
+    except ClientError as e:
+        raise TurkAPIError(e)
 
 def approve_assignment(assignmentid):
     params = {'AssignmentId' : assignmentid\
               #,'RequesterFeedback' : 'Correct answer was "'+answer+'"'
               }
-    return ask_turk('ApproveAssignment', params)
+    return BOTO_CLIENT.approve_assignment(**params)
    
 def verify_approve_assignment(assid):
     r = approve_assignment(assid)
@@ -351,43 +295,21 @@ def verify_approve_assignment(assid):
 def assignment_status(assid, hitid):
     asses = get_assignments_for_hit(hitid)
     for ass in asses:
-        if assid == get(ass, 'AssignmentId'):
-            return get(ass, 'AssignmentStatus')
+        if assid == ass['AssignmentId']:
+            return ass['AssignmentStatus']
     return None
 
 def reject_assignment(assignmentid):
     params = {'AssignmentId' : assignmentid\
               #,'RequesterFeedback' : 'Correct answer was "'+answer+'"'
               }
-    return ask_turk('RejectAssignment', params)
-   
-    
-
-def disable_hit(hitid):
-    # Turns it off, but it stays on amazon's servers
-    params = {'HITId' : hitid}
-    print 'Killing hit ' + hitid
-    return ask_turk('DisableHIT', params)
-
-def disable_all_hits():
-    for hit in get_all_hits():
-        disable_hit(hit)
-
-def dispose_hit(hitid):
-    # disables and deletes it from amazon's servers
-    params = {'HITId' : hitid}
-    print 'Killing hit ' + hitid
-    return ask_turk('DisposeHIT', params)
-
-def dispose_all_hits():
-    return "this is dangerous! you sure? edit the code if you mean it"
-    for hit in get_all_hits():
-        dispose_hit(hit)
+    return BOTO_CLIENT.reject_assignment(**params)
 
 def expire_hit(hitid):
-    params = {'HITId' : hitid}
     #print 'Killing hit ' + hitid
-    return ask_turk('ForceExpireHIT', params)
+    return BOTO_CLIENT.update_expiration_for_hit(
+        HITId=hitid,
+        ExpireAt=datetime.now())
 
 def expire_all_hits():
     for hit in get_all_hits():
@@ -396,9 +318,9 @@ def expire_all_hits():
 def approve_all_hits():
     for hit in get_reviewable_hit_ids():
         asses = get_assignments_for_hit(hit)
-        print "Looking at assignments ", asses.toprettyxml(), ' for ', hit
+        print "Looking at assignments ", str(asses), ' for ', hit
         for ass in asses:
-            ass = get(ass, 'AssignmentId')
+            ass = ass['AssignmentId']
             approve_assignment(ass)
 
 
@@ -411,40 +333,70 @@ def register_hit_type(title, description, reward, duration, keywords):
               'Reward.1.CurrencyCode' : 'USD',
               'AssignmentDurationInSeconds' : duration,
               'Keywords' : keywords}
-    return ask_turk('RegisterHITType', params)
+    return BOTO_CLIENT.create_hit_type(**params)
 
 
 # no_india_qual = dict(QualificationTypeId = '00000000000000000071',
 #                      Comparator='NotEqualTo',
 #                      LocaleValue='IN', IntegerValue=None)
-def create_hit(question, title, description, keywords, ass_duration, lifetime, assignments=1, reward=0.0, tag=None, block_india=False, block_usa=False):
+def create_hit(
+        question,
+        title,
+        description,
+        keywords,
+        ass_duration,
+        lifetime,
+        assignments=1,
+        reward=0.0,
+        tag=None,
+        block_india=False,
+        block_usa=False,
+        hits_approved=None,
+        percent_hits_approved=None):
     params = {'Title' : title,
               'Question' : question,
               'MaxAssignments' : assignments,
-              'RequesterAnnotation' : tag,
               'Description' : description,
-              'Reward.1.Amount' : reward,
-              'Reward.1.CurrencyCode' : 'USD',
+              'Reward' : str(reward),
               'AssignmentDurationInSeconds' : ass_duration,
               'LifetimeInSeconds' : lifetime,
               'Keywords' : keywords
               }
+    if tag is not None:
+        params['RequesterAnnotation'] = tag
 
-    if block_india:
-        params['QualificationRequirement.1.QualificationTypeId']='00000000000000000071'
-        params['QualificationRequirement.1.Comparator']='EqualTo'
-        params['QualificationRequirement.1.LocaleValue.Country']='US'
-        params['QualificationRequirement.1.RequiredToPreview']=True
-    if block_usa:
-        params['QualificationRequirement.2.QualificationTypeId']='00000000000000000071'
-        params['QualificationRequirement.2.Comparator']='NotEqualTo'
-        params['QualificationRequirement.2.LocaleValue.Country']='US'
-        params['QualificationRequirement.2.RequiredToPreview']=True
+    qualifications = []
+    if block_india or block_usa:
+        qualifications.append({
+            'QualificationTypeId': '00000000000000000071',
+            'Comparator': 'EqualTo' if block_india else 'NotEqualTo',
+            'LocaleValues': [
+                {
+                    'Country': 'US'
+                }],
+            'RequiredToPreview': True
+        })
+    if hits_approved is not None:
+        qualifications.append({
+            'QualificationTypeId': '00000000000000000040',
+            'Comparator': 'GreaterThanOrEqualTo',
+            'IntegerValues': [hits_approved],
+            'RequiredToPreview': True
+        })
+    if percent_hits_approved is not None:
+        qualifications.append({
+            'QualificationTypeId': '000000000000000000L0',
+            'Comparator': 'GreaterThanOrEqualTo',
+            'IntegerValues': [percent_hits_approved],
+            'RequiredToPreview': True
+        })
+    if len(qualifications) > 0:
+        params['QualificationRequirements'] = qualifications
 
-    result = ask_turk('CreateHIT', params)
-    update_hit(xml=result)
-    return result
-    
+    result = BOTO_CLIENT.create_hit(**params)
+    update_hit(hitid=result['HIT']['HITId'])
+    return result['HIT']
+
 
 def external_question(url, frame_height):
     return """<ExternalQuestion xmlns="http://mechanicalturk.amazonaws.com/AWSMechanicalTurkDataSchemas/2006-07-14/ExternalQuestion.xsd">
@@ -478,28 +430,19 @@ def openhit(hitxml):
     webbrowser.open_new_tab(hit_url(hitxml))
 
 
-def message_worker(workerid, subject, body):
-    params = {'Subject' : subject,
-              'MessageText' : body,
-              'WorkerId' : workerid
-              }
-    return ask_turk('NotifyWorkers', params)
-    
 def message_workers(workerids, subject, body):
     params = {'Subject' : subject,
-              'MessageText' : body
+              'MessageText' : body,
+              'WorkerIds': workerids
               }
 
-    for i,wid in enumerate(workerids):
-        params['WorkerId.'+str(i)] = wid
+    return BOTO_CLIENT.notify_wokrers(**params)
 
-    return ask_turk('NotifyWorkers', params)
-    
 def block_worker(workerid, reason):
     params = {'WorkerId' : workerid,
               'Reason' : reason
               }
-    return ask_turk('BlockWorker', params)
+    return BOTO_CLIENT.create_worker_block(**params)
 
 def add_turk_fees(hit_price):
     return max(.005, hit_price + hit_price*.1)
@@ -517,6 +460,7 @@ db.define_table('hits',
                 db.Field('hitid', 'text'),
                 db.Field('status', 'text', default='open'),
                 db.Field('xmlcache', 'text'), # Local copy of mturk xml
+                db.Field('jsoncache', 'text'),
                 db.Field('launch_date', 'datetime'),
                 db.Field('other', 'text')) # Not used yet...
 
@@ -527,6 +471,7 @@ db.define_table('assignments',
                 db.Field('ip', 'text'),
                 db.Field('status', 'text'),
                 db.Field('xmlcache', 'text'),
+                db.Field('jsoncache', 'text'),
                 # How did I use this flag?  Don't recall.
                 #db.Field('cache_dirty', 'boolean', default=True),
                 db.Field('accept_time', 'datetime'),
@@ -544,15 +489,16 @@ def update_hit(xml=None, hitid=None):
         hitid = get(xml, 'HITId')
 
     assert(hitid)
-    xml = get_hit(hitid)
+    hit = get_hit(hitid)
+    serialized = serializers.json(hit)
 
     row = db.hits(hitid = hitid)
     if not row:
         rowid = db.hits.insert(hitid = hitid,
                                launch_date = datetime.now())
         row = db.hits(id = rowid)
-    row.update_record(xmlcache = xml.toxml(),
-                      status = get(xml, 'HITStatus'))
+    row.update_record(jsoncache = serialized,
+                      status = hit.get('HITStatus', None))
     db.commit()
 
 def update_hits():
@@ -591,16 +537,16 @@ def update_asses(n=None):
         print ('Updating asses for hit %s/%s' % (i+1, len(hits)))
         asses = get_assignments_for_hit(hit.hitid)
         for ass in asses:
-            assid = get(ass, 'AssignmentId')
+            assid = ass['AssignmentId']
             bonus_amount = bonus_total(assid)
 
             row = db.assignments(assid = assid)
             params = dict(assid=assid,
                           hitid=hit.hitid,
-                          workerid=get(ass, 'WorkerId'),
-                          status=get(ass, 'AssignmentStatus'),
+                          workerid=ass['WorkerId'],
+                          status=ass['AssignmentStatus'],
                           paid = bonus_amount, # Oversimplification
-                          xmlcache = ass.toxml())
+                          jsoncache = serializers.json(ass))
             if row:
                 row.update_record(**params)
             else:
@@ -616,16 +562,16 @@ def fetch_from_amazon(n=None):
         update_hit(hitid=hit.hitid)
         asses = get_assignments_for_hit(hit.hitid)
         for ass in asses:
-            assid = get(ass, 'AssignmentId')
+            assid = ass['AssignmentId']
             bonus_amount = bonus_total(assid)
 
             row = db.assignments(assid = assid)
             params = dict(assid=assid,
                           hitid=hit.hitid,
-                          workerid=get(ass, 'WorkerId'),
-                          status=get(ass, 'AssignmentStatus'),
+                          workerid=ass['WorkerId'],
+                          status=ass['AssignmentStatus'],
                           paid = bonus_amount, # Oversimplification
-                          xmlcache = ass.toxml())
+                          jsoncache = serializers.json(ass))
             if row:
                 row.update_record(**params)
             else:
@@ -678,9 +624,9 @@ def extra_db_methods_vf(clss):
 
 def store_get(key):
     r = db(db.store.key==key).select().first()
-    return r and json.loads(r.value)
+    return r and serializers.loads_json(r.value)
 def store_set(key, value):
-    value = json.dumps(value); record = db.store(db.store.key==key)
+    value = serializers.json(value); record = db.store(db.store.key==key)
     result = record.update_record(value=value) \
         if record else db.store.insert(key=key, value=value)
     db.commit()

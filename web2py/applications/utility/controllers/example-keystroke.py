@@ -10,7 +10,6 @@ FAIL_CHANCE = 0.00
 ENROLL_PRICE = 0.04
 
 import random, hashlib, uuid, datetime, time, math
-import gluon.contrib.simplejson
 
 messages = dict(
     terse = dict(
@@ -638,7 +637,7 @@ def validate(typing, text, form):
         form.errors['text'] = get_message('validateNotTyped')
         return False
 
-    typing = gluon.contrib.simplejson.loads(typing)
+    typing = fromjson(typing)
     keyphrase = KEYPHRASE
 
     # check for typos that the string matches

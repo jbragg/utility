@@ -3,3 +3,4 @@ dependencies:
     - scipy=0.18.*
     - psycopg2=2.6.*
     - ipython
+    - boto3=1.4.*

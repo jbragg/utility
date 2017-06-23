@@ -19,12 +19,12 @@ for table in db.tables:
     #t.count = types.MethodType(count, t)
 def store_get(key):
     r = db(db.store.key==key).select().first()
-    return r and sj.loads(r.value)
+    return r and fromjson(r.value)
 def store_set(key, value):
     # update_or_insert doesn't work in old web2pys... cause of a bug...
-    #return db.store.update_or_insert(key=key, value=sj.dumps(value))
+    #return db.store.update_or_insert(key=key, value=tojson(value))
     # So I wrote my own:
-    value = sj.dumps(value)
+    value = tojson(value)
     record = db.store(db.store.key==key)
     return record.update_record(value=value) \
         if record else db.store.insert(key=key, value=value)
@@ -151,7 +151,7 @@ def study_conditions_with(study, var, val):
     if last_study != study:
         last_study = study
         last_conditions = available_conditions(study)
-    return [c for c in last_conditions if sj.loads(c.json)[var] == val]
+    return [c for c in last_conditions if fromjson(c.json)[var] == val]
 
 def study_conditions_by_var(study, var):
     result = {}
@@ -167,7 +167,7 @@ def conditions_query(table, conditions):
     return query
 
 def pretty_condition(study, condition):
-    c = sj.loads(condition.json)
+    c = fromjson(condition.json)
     items = c.items()
     def pretty(item):
         if item[0] == 'price':

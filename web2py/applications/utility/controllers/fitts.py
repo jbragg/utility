@@ -13,13 +13,13 @@ def index():
             log('AJAX ERROR!!!!!!! it says error=%s' % request.vars.error)
 
         if request.vars.clicks:
-            clicks = sj.loads(request.vars.clicks)
+            clicks = fromjson(request.vars.clicks)
             if len(clicks) == request.num_tasks:
                 log('finished this fitts!')
                 other_data = dict(clicks=clicks)
                 record_action('fitts results', other_data)
                 hit_finished(do_redirect=False)
-                return sj.dumps({'redirect' : turk_submit_url()})
+                return tojson({'redirect' : turk_submit_url()})
             
     result = {'left' : '%dpx' % (x),
               'top' : '%dpx' % (y),
@@ -47,13 +47,13 @@ def fittsfun ():
             log('AJAX ERROR!!!!!!! it says error=%s' % request.vars.error)
 
         if request.vars.clicks:
-            clicks = sj.loads(request.vars.clicks)
+            clicks = fromjson(request.vars.clicks)
             if len(clicks) == request.num_tasks:
                 log('finished this fitts!')
                 other_data = dict(clicks=clicks)
                 record_action('fitts results', other_data)
                 hit_finished(do_redirect=False)
-                return sj.dumps({'redirect' : turk_submit_url()})
+                return tojson({'redirect' : turk_submit_url()})
             
     result = {'left' : x,
               'top' : y,
@@ -81,13 +81,13 @@ def fittsbomb ():
             log('AJAX ERROR!!!!!!! it says error=%s' % request.vars.error)
 
         if request.vars.clicks:
-            clicks = sj.loads(request.vars.clicks)
+            clicks = fromjson(request.vars.clicks)
             if len(clicks) == request.num_tasks:
                 log('finished this fitts!')
                 other_data = dict(clicks=clicks)
                 record_action('fitts results', other_data)
                 hit_finished(do_redirect=False)
-                return sj.dumps({'redirect' : turk_submit_url()})
+                return tojson({'redirect' : turk_submit_url()})
             
     result = {'left' : x,
               'top' : y,

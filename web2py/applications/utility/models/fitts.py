@@ -21,10 +21,10 @@ def study_cond_fitts_times(study, condition):
 def fitts_times(query):
     ''' Takes a query over the actions table '''
     rows = db(query & (actions.action == 'fitts results')).select()
-    time_sum = sum([sum([clicks['click_time'] for clicks in sj.loads(row.other)['clicks'][1:]])
+    time_sum = sum([sum([clicks['click_time'] for clicks in fromjson(row.other)['clicks'][1:]])
                     for row in rows])
 
-    count_sum = sum([max([clicks['count'] for clicks in sj.loads(row.other)['clicks'][1:]])
+    count_sum = sum([max([clicks['count'] for clicks in fromjson(row.other)['clicks'][1:]])
                     for row in rows])
 
     return float(time_sum)/count_sum
@@ -50,7 +50,7 @@ def fitts_times_old(study):
             if not row.other:
 #                 log(row.other)
                 continue
-            data = sj.loads(row.other)
+            data = fromjson(row.other)
 #             if not 'click_time' in data:
 #                 log('bad data ' + data)
             if 'click_time' in data: # and data['click_time'] < 
@@ -65,7 +65,7 @@ def fitts_times_old(study):
 def annotate_fitts_runs(study):
     for run in db(db.runs.study==study).select():
         run.update_record( \
-            other = sj.dumps( \
+            other = tojson( \
                 {'click_time' : \
                      fitts_times((actions.workerid == run.workerid)
                                  & (actions.time >= run.start_time)
@@ -78,22 +78,22 @@ def fitts_csv(study):
     def to_hourly(dollars_per_ms):
         return '%.2f' % (dollars_per_ms * 1000 * 60 * 60)
     def click_time(row):
-        return '%d' % sj.loads(row.runs.other)['click_time']
+        return '%d' % fromjson(row.runs.other)['click_time']
     def task_wage(row):
-        price = sj.loads(row.conditions.json)['price']
-        width = sj.loads(row.conditions.json)['width']
+        price = fromjson(row.conditions.json)['price']
+        width = fromjson(row.conditions.json)['width']
         width_time = fitts_times_by_var(study,
                                         'width',
                                         time_per_condition)[width]
-        num_tasks = sj.loads(row.conditions.json)['num_tasks']
+        num_tasks = fromjson(row.conditions.json)['num_tasks']
         log('Dealing with price=%s, width=%s, width_time=%s, num_tasks=%s' %
                       (price, width, width_time, num_tasks))
         return to_hourly(price / (width_time * num_tasks))
 
     def personal_wage(row):
-        price = sj.loads(row.conditions.json)['price']
-        time = sj.loads(row.runs.other)['click_time']
-        num_tasks = sj.loads(row.conditions.json)['num_tasks']
+        price = fromjson(row.conditions.json)['price']
+        time = fromjson(row.runs.other)['click_time']
+        num_tasks = fromjson(row.conditions.json)['num_tasks']
         return to_hourly(price / (time * num_tasks))
 
 

@@ -3,7 +3,7 @@ from scipy import array
 # ============== Data Analysis =============
 def study_result(study, result):
     if not study.results: return ''
-    d = sj.loads(study.results)
+    d = fromjson(study.results)
     if result not in d: return ''
     return d[result]
 
@@ -876,13 +876,13 @@ def runs_csv(conditions, study=None):
     return result
 
 def study_runs_csv(study, filename=None):
-    conditions = sj.loads(study.conditions)
+    conditions = fromjson(study.conditions)
     with open(filename or 'study_%d.csv' % study.id, 'w') as f:
         variables = experimental_vars(study)
         f.write('id,run_length,%s,start_time,end_time,workerid,censored,other\n'
                 % ','.join(variables))
         for run in db(db.runs.study==study).select():
-            condition = sj.loads(run.condition.json)
+            condition = fromjson(run.condition.json)
             vals = ([run.id,
                      run.length]
                     + [condition[key] for key in variables]
@@ -929,7 +929,7 @@ def work_rate(study, conditions, ignored_workers=[]):
 
 def study_work_rates(study, ignored_workers=[]):
     conditions = available_conditions(study)
-    condition_specs = sj.loads(study.conditions)
+    condition_specs = fromjson(study.conditions)
     evs = experimental_vars_vals(study)
 
     data = []
@@ -941,7 +941,7 @@ def study_work_rates(study, ignored_workers=[]):
                              study_conditions_with(study, var, val),
                              ignored_workers)
 #                              [c for c in available_conditions(study)
-#                               if sj.loads(c.json)[var] == val])
+#                               if fromjson(c.json)[var] == val])
             var_data.append((val,rate))
         data.append((var,var_data))
         # and/or maybe to get the mean of all conditions with that value
@@ -949,7 +949,7 @@ def study_work_rates(study, ignored_workers=[]):
 
 def study_work_rates_all(study):
     conditions = available_conditions(study)
-    condition_specs = sj.loads(study.conditions)
+    condition_specs = fromjson(study.conditions)
     evs = experimental_vars_vals(study)
 
     data = []
@@ -959,7 +959,7 @@ def study_work_rates_all(study):
         for val in vals:
             rates = [work_rate(study,[c])
                      for c in conditions
-                     if sj.loads(c.json)[var] == val]
+                     if fromjson(c.json)[var] == val]
             var_data.append((val,rates))
         data.append((var,var_data))
         # and/or maybe to get the mean of all conditions with that value
@@ -1037,7 +1037,7 @@ def wr_3dplot(study):
 
 def record_result(study, tag, result):
     if study.results:
-        results = sj.loads(study.results)
+        results = fromjson(study.results)
     else:
         results = {}
 
@@ -1153,7 +1153,7 @@ def completion_time(row):
 def completion_rate(row):
     return float(row.runs.length) / completion_time(row)
 def wage(row):
-    price = sj.loads(row.conditions.json)['price']
+    price = fromjson(row.conditions.json)['price']
     num_tasks = row.runs.length
     return '%.2f' % ((price*num_tasks) / completion_time(row))
 
@@ -1181,7 +1181,7 @@ def claus_csv(study, extra_cols=None, extra_cols_generators=None):
 
         if (extra_cols==None):
             other = runs[0].runs.other
-            d = other and sj.loads(other)
+            d = other and fromjson(other)
             if isinstance(d,dict) and len(d.keys()) > 0:
                 extra_cols = d.keys()
             else:
@@ -1191,7 +1191,7 @@ def claus_csv(study, extra_cols=None, extra_cols_generators=None):
             # extra_col inside the row's "other" field's json object
             def f(col):
                 def g(row):
-                    return sj.loads(row.runs.other)[col]
+                    return fromjson(row.runs.other)[col]
                 return g
             extra_cols_generators = [f(c) for c in extra_cols]
 
@@ -1252,7 +1252,7 @@ def claus_csv(study, extra_cols=None, extra_cols_generators=None):
             row = row[:i] + localtime + row[i:]
 
             # Put the conditions in there
-            vals = sj.loads(row.pop())           # Remove the json object
+            vals = fromjson(row.pop())           # Remove the json object
             for v in condition_vars:
                 row.append(clean(vals[v]))
 
@@ -1346,7 +1346,7 @@ def captcha_csv(study):
 #                                          + timedelta(hours=record.workers.time_zone)))
 
 #             # Put the conditions in there
-#             vals = sj.loads(row.pop())           # Remove the json object
+#             vals = fromjson(row.pop())           # Remove the json object
 #             for v in condition_vars:
 #                 row.append(clean(vals[v]))
 
@@ -1355,9 +1355,9 @@ def captcha_csv(study):
 
 
 def price_func(row):
-    return sj.loads(row.conditions.json)['price']
+    return fromjson(row.conditions.json)['price']
 def width_func(row):
-    return sj.loads(row.conditions.json)['width']
+    return fromjson(row.conditions.json)['width']
 
 def r_test(study, x_func):
     runs = db((db.runs.study == study)
@@ -1377,7 +1377,7 @@ def r_test(study, x_func):
                       db.runs.other)
 
     #x = [(run.runs.length, x_func(run)) for run in runs]
-    y = [run.runs.length for run in runs if sj.loads(run.conditions.json)['width'] == 30]
+    y = [run.runs.length for run in runs if fromjson(run.conditions.json)['width'] == 30]
     n = len(y)
     x = range(n)
     x = [0,1]*(n/2 + 1)

@@ -44,8 +44,8 @@ def init_gen_study(task, name, description, conditions, hit_params):
                              'launch_date' : datetime.now(),
                              'description' : description,
                              'task' : task,
-                             'hit_params' : sj.dumps(hit_params, sort_keys=True)})
-    study.update_record(conditions = sj.dumps(conditions, sort_keys=True))
+                             'hit_params' : tojson(hit_params)})
+    study.update_record(conditions = tojson(conditions))
     options.task = conditions
     db.commit()
 

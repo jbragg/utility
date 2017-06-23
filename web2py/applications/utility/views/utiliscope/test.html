@@ -60,7 +60,7 @@ $('button#throw').click(function () {
 		$.ajax({
 			type: "POST",
 			url: "/utiliscope/launch_one_off_hit",
-			data: {task: '{{=request.task}}', sandbox: {{=sj.dumps(sandboxp)}} },
+			data: {task: '{{=request.task}}', sandbox: {{=tojson(sandboxp)}} },
 			success: function () {
 				alert("Now you've done it! You launched a hit!");
 			}

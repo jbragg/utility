@@ -68,12 +68,12 @@ def refresh_hit_status():
     failed_refreshes = []
     for hit in hits:
         try:
-            xml = turk.get_hit(hit.hitid)
+            hitobj = turk.get_hit(hit.hitid)
         except TurkAPIError as e:
             failed_refreshes.append(hit.hitid)
             continue
 
-        status = turk.is_valid(xml) and turk.get(xml,'HITStatus')
+        status = hitobj.get('HITStatus', False)
         if not status:
             continue
 
@@ -95,7 +95,7 @@ def refresh_hit_status():
             # Unassignable happens when someone is doing it now
             # The only other option is Assignable
             newstatus = 'closed'
-        record_hit_data(hitid=hit.hitid, status=newstatus, xmlcache=xml.toxml())
+        record_hit_data(hitid=hit.hitid, status=newstatus, jsoncache=tojson(hitobj))
     if failed_refreshes:
         debug_t('MTurk API went bogus for refreshing %s/%s hits',
                 len(failed_refreshes), len(hits))
@@ -218,15 +218,15 @@ def update_ass_from_mturk(hitid):
 
     # Go through each assignment
     for ass in asses:
-        assid = turk.get(ass, 'AssignmentId')
+        assid = ass['AssignmentId']
         bonus_amount = turk.bonus_total(assid)
 
         update_ass(assid,
-                   hitid=turk.get(ass, 'HITId'),
-                   workerid=turk.get(ass, 'WorkerId'),
-                   status=turk.get(ass, 'AssignmentStatus'),
+                   hitid=ass['HITId'],
+                   workerid=ass['WorkerId'],
+                   status=ass['AssignmentStatus'],
                    paid = bonus_amount,
-                   xmlcache=ass.toxml())
+                   jsoncache=tojson(ass))
     
 def give_bonus_up_to(assid, workerid, bonusamt, reason):
     delta = turk.give_bonus_up_to(assid, workerid, float(bonusamt), reason)
@@ -238,13 +238,13 @@ def give_bonus_up_to(assid, workerid, bonusamt, reason):
 
 
 # ============== Launch a Whole Study =============
-def schedule_hit(launch_date, study, task, othervars):
+def schedule_hit(launch_date, study, task=None, othervars=None):
     def varnum(array, index): return array[index] if len(array) > index else None
     db.hits.insert(status = 'unlaunched',
                    launch_date = launch_date,
                    study = study,
-                   task = task,
-                   othervars = sj.dumps(othervars))
+                   task = task if task is not None else db.studies[study].task,
+                   othervars = tojson(othervars or {}))
     db.commit()
 def launch_study(num_hits, task, name, description, hit_params=None):
     # Hit params default to what's in options, but can be overridden here
@@ -258,8 +258,8 @@ def launch_study(num_hits, task, name, description, hit_params=None):
                              'launch_date' : datetime.now(),
                              'task' : task})
     study.update_record(description = description,
-                        conditions = sj.dumps(conditions, sort_keys=True),
-                        hit_params = sj.dumps(params, sort_keys=True))
+                        conditions = tojson(conditions),
+                        hit_params = tojson(params))
 
     for i in range(num_hits):
         schedule_hit(datetime.now(), study.id, task, {})
@@ -299,12 +299,12 @@ def launch_hit(hit):
         # Get the hit parameters, which default to Mystery Task
         params = Storage(mystery_task_params)
         assert hit.study.hit_params, 'No parameters for this hit!'
-        params.update(sj.loads(hit.study.hit_params))
+        params.update(fromjson(hit.study.hit_params))
 
         # Give it a url
         params['question'] = turk.external_question(
             hit_serve_url(hit.task), iframe_height)
-        
+
         # Launch the hit
         result = turk.create_hit(params.question,
                                  params.title,
@@ -315,22 +315,25 @@ def launch_hit(hit):
                                  params.assignments,
                                  params.reward,
                                  params.tag,
-                                 params.block_india)
+                                 params.block_india,
+                                 params.block_usa,
+                                 params.hits_approved,
+                                 params.percent_hits_approved)
 
-        hitid = turk.get(result, 'HITId')
+        hitid = result['HITId']
         if not hitid: raise TurkAPIError('LOST A HIT! This shouldn\'t happen! check this out.')
 
         debug_t('Launched hit %s' % hitid)
 
         # Get this into the hits database quick, in case future calls fail
-        hit.update_record(hitid=hitid, xmlcache='fail! not inserted yet', status='open')
+        hit.update_record(hitid=hitid, jsoncache='fail! not inserted yet', status='open')
         db.commit()
 
-        # Now let's get the xml result, and put the rest of this into the log
-        xml = turk.get_hit(hitid)
+        # Now let's get the result, and put the rest of this into the log
+        hitobj = turk.get_hit(hitid)
         record_hit_data(hitid=hitid,
                         #creation_time=turk.hit_creation(xml),
-                        xmlcache=xml.toxml())
+                        jsoncache=tojson(hitobj))
 
     except TurkAPIError as e:
         debug_t('Pooh! Launching hit id %s failed with:\n\t%s' \

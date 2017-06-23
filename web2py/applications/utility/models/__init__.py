@@ -1,3 +1,4 @@
+import boto3
 import time
 start_time = time.time()
 '''
@@ -48,18 +49,26 @@ if 'LoadSettingsOnly' in globals():
 # Import
 import applications.utility.modules.turk as turk
 from applications.utility.modules.turk import TurkAPIError
-import gluon.contrib.simplejson as sj
 from gluon.storage import Storage
 import gluon.utils
 from datetime import datetime, timedelta
-tojson = sj.dumps
-fromjson = sj.loads
+from gluon.serializers import json as tojson
+from gluon.serializers import loads_json as fromjson
 
 # setup turk library
 turk.SANDBOXP = sandboxp
 turk.LOCAL_EXTERNAL_P = sandbox_serves_from_localhost_p
 turk.AWS_ACCESS_KEY_ID = aws_access_key_id
 turk.AWS_SECRET_ACCESS_KEY = aws_secret_access_key
+turk.BOTO_CLIENT = boto3.client(
+    'mturk',
+    endpoint_url='https://mturk-requester{0}.{1}.amazonaws.com'.format(
+	'-sandbox' if sandboxp else '',
+	'us-east-1'),
+    region_name='us-east-1',
+    aws_access_key_id=aws_access_key_id,
+    aws_secret_access_key=aws_secret_access_key)
+
 
 # constants
 iframe_height = 650
@@ -168,6 +177,7 @@ db.define_table('hits',
 
                 # xmlcache is a local copy of mturk xml
                 db.Field('xmlcache', 'text'),
+                db.Field('jsoncache', 'text'),
 
                 db.Field('launch_date', 'datetime'),
                 db.Field('task', 'text'),
@@ -188,6 +198,7 @@ db.define_table('assignments',
                 db.Field('workerid', 'text'),
                 db.Field('status', 'text'),
                 db.Field('xmlcache', 'text'),
+                db.Field('jsoncache', 'text'),
                 db.Field('cache_dirty', 'boolean', default=True),
                 db.Field('accept_time', 'datetime'),
                 db.Field('paid', 'double', default=0.0),
@@ -316,7 +327,7 @@ def record_action(action, other=None):
     if not request.hitid or request.testing:
         return False
 
-    if other: other = sj.dumps(other, sort_keys=True)
+    if other: other = tojson(other)
 
     db.actions.insert(study      = request.study,
                       action     = action,
@@ -436,6 +447,7 @@ def record_hit_data(hitid,
                     study=None,
                     status=None,
                     xmlcache=None,
+                    jsoncache=None,
                     launch_date=None,
                     task=None,
                     price=None,
@@ -445,8 +457,12 @@ def record_hit_data(hitid,
     soft_assert(not xmlcache or (type(xmlcache) == type('sdflkj')
                                  or type(xmlcache) == type(u'sdflkj')),
                 'bad xmlcache... it is a ' + str(type(xmlcache)))
+    soft_assert(not jsoncache or (type(jsoncache) == type('sdflkj')
+                                 or type(jsoncache) == type(u'sdflkj')),
+                'bad jsoncache... it is a ' + str(type(jsoncache)))
 
-    # XXX Consider auto-updating the hit status from xmlcache
+
+    # XXX Consider auto-updating the hit status from jsoncache
 
     hit = db.hits(hitid=hitid)
     if hit:
@@ -456,6 +472,7 @@ def record_hit_data(hitid,
         if study: hit.update_record(study=study)
         if status: hit.update_record(status=status)
         if xmlcache: hit.update_record(xmlcache=xmlcache)
+        if jsoncache: hit.update_record(jsoncache=jsoncache)
         if launch_date: hit.update_record(launch_date=launch_date)
         if task: hit.update_record(task=task)
         if price: hit.update_record(price=price)
@@ -467,6 +484,7 @@ def record_hit_data(hitid,
                        study=study,
                        status=status,
                        xmlcache=xmlcache,
+                       jsoncache=jsoncache,
                        launch_date=launch_date,
                        task=task,
                        price=price,
@@ -475,7 +493,7 @@ def record_hit_data(hitid,
         db.commit()
         raise Exception('This is not good... hope you meant it...')
     db.commit()
-def update_ass(assid, hitid=None, workerid=None, status=None, paid=None, accept_time=None, xmlcache=None, condition=None):
+def update_ass(assid, hitid=None, workerid=None, status=None, paid=None, accept_time=None, xmlcache=None, jsoncache=None, condition=None):
     '''If xmlcache is provided, automatically fills in the other
     parmeaters, except paid.'''
 
@@ -490,6 +508,14 @@ def update_ass(assid, hitid=None, workerid=None, status=None, paid=None, accept_
         status = turk.get(x, 'AssignmentStatus')
         accept_time = turk.get(x, 'AcceptTime')
         dirty = False
+    if jsoncache:
+        x = fromjson(jsoncache)
+        assid = x['AssignmentId']
+        hitid = x['HITId']
+        workerid = x['WorkerId']
+        status = x['AssignmentStatus']
+        accept_time = x['AcceptTime']
+        dirty = False
 
     ass = db.assignments(assid=assid)
     if not ass:
@@ -499,6 +525,7 @@ def update_ass(assid, hitid=None, workerid=None, status=None, paid=None, accept_
                               status=status,
                               paid=paid,
                               xmlcache=xmlcache,
+                              jsoncache=jsoncache,
                               cache_dirty=dirty,
                               condition=condition)
     else:
@@ -511,6 +538,7 @@ def update_ass(assid, hitid=None, workerid=None, status=None, paid=None, accept_
         if paid: ass.update_record(paid=paid)
         if accept_time: ass.update_record(accept_time=accept_time)
         if xmlcache: ass.update_record(xmlcache=xmlcache)
+        if jsoncache: ass.update_record(jsoncache=jsoncache)
         if condition: ass.update_record(condition=condition)
 
         ass.update_record(cache_dirty=dirty)
@@ -524,7 +552,7 @@ def send_me_mail(message):
     debug('Scheduling an email task.')
     db.scheduler_task.insert(function_name='send_email',
                              application_name='utility/utiliscope',
-                             vars=sj.dumps(vars))
+                             vars=tojson(vars))
     db.commit()
 
 last_time = start_time
@@ -578,17 +606,17 @@ def make_request_vars_convenient():
 
 # ============== Experimental Conditions =============
 def condition(condition_number):
-    return sj.loads(db.conditions(condition_number).json)
+    return fromjson(db.conditions(condition_number).json)
 load_condition = condition
 def get_condition(dict):
     soft_assert(type(dict).__name__ != 'str')
-    json = sj.dumps(dict, sort_keys=True)
+    json = tojson(dict)
     c = db.conditions(json=json)
     if not c: c = db.conditions.insert(json=json)
     return c
 
 def available_conditions(study):
-    conds = [sj.loads(db.conditions[x.condition].json)
+    conds = [fromjson(db.conditions[x.condition].json)
              for x in
              db(db.actions.study == study) \
                  .select(db.actions.condition, distinct=True)]
@@ -601,13 +629,13 @@ def available_conditions(study):
     return [get_condition(x) for x in conds]
 
 def experimental_vars(study):
-    conditions = sj.loads(study.conditions)
+    conditions = fromjson(study.conditions)
     vars = conditions.keys()
     return [x for x in vars
             if isinstance(conditions[x], (list, tuple))]
 
 def experimental_vars_vals(study):
-    conditions = sj.loads(study.conditions)
+    conditions = fromjson(study.conditions)
     for k,v in conditions.items():
         if not isinstance(v, (list, tuple)):
             del conditions[k]
@@ -624,7 +652,7 @@ def hash_to_bucket(string, buckets):
 
 def old_choose_condition():
     return sample_from_conditions(
-        sj.loads(request.study.conditions),
+        fromjson(request.study.conditions),
         request.workerid)
 
 def choose_condition():
@@ -636,7 +664,7 @@ def choose_condition():
     # and this would set condition to another worker's condition..
     action = db.actions(assid=request.assid, workerid=request.workerid)
     if action:
-        request.condition = sj.loads(action.condition.json)
+        request.condition = fromjson(action.condition.json)
         request.phase = action.phase
         log('Choosing existing assignment condition')
         return
@@ -652,7 +680,7 @@ def choose_condition():
                                     phase=request.phase)
     if c:
         log('Choosing existing phase condition')
-        request.condition = sj.loads(c.condition.json)
+        request.condition = fromjson(c.condition.json)
         return
 
     # Else, let's make a new one.
@@ -672,7 +700,7 @@ def choose_condition():
     # Now add the singleton variables back into the condition... (need
     # to make this more consistent between singleton option variables
     # and experimental variables from a list)
-    for k, v in sj.loads(request.study.conditions).items():
+    for k, v in fromjson(request.study.conditions).items():
         if is_singleton(v): request.condition[k] = v
 
     # Insert this into the database
@@ -843,8 +871,8 @@ def load_live_hit():
     # Load hit from the database.  Get the basics.
     hit = db.hits(hitid = request.hitid)
     request.study = db.studies[hit.study]
-    if hit.othervars and sj.loads(hit.othervars):
-        othervars = sj.loads(hit.othervars)
+    if hit.othervars and fromjson(hit.othervars):
+        othervars = fromjson(hit.othervars)
         request.update(othervars)
         request.vars.update(othervars)
     request.task = hit.task
@@ -918,7 +946,7 @@ def load_testing_hit():
 
     # Load conditions ... in a bunch (too many) of ways
 #     if request.vars.condition:
-#         request.condition = sj.loads(db.conditions[int(request.vars.condition)].json)
+#         request.condition = fromjson(db.conditions[int(request.vars.condition)].json)
 
     if is_preview():
         request.condition = {}

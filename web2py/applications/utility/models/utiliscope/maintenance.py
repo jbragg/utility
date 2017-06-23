@@ -80,8 +80,8 @@ def clean_bonus_queue(sloppy=False):
         turks_ass = turk.get_assignments_for_hit(b.hitid)
         if len(turks_ass) != 1: continue
         turks_ass = turks_ass[0]
-        turks_assid = turk.get(turks_ass, 'AssignmentId')
-        turks_ass_status = turk.get(turks_ass, 'AssignmentStatus')
+        turks_assid = turks_ass['AssignmentId']
+        turks_ass_status = turks_ass['AssignmentStatus']
         bonus_ass_status = turk.assignment_status(b.assid, b.hitid)
         turk_ass_ok = (turks_ass_status == u'Approved')
         if sloppy:

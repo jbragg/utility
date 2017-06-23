@@ -53,7 +53,7 @@ def record_entry_survey(post):
     age = post.age
     gender = post.gender
     occupation = post.occupation
-    biometric = sj.dumps(post.biometric)
+    biometric = tojson(post.biometric)
     verification = post.verify
     
     db.ks_entry_surveys.insert(study=request.study,
