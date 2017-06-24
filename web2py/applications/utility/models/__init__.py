@@ -274,13 +274,15 @@ options.fail = { 'price' : 0 }
 def hit_finished(bonus_amount=None, do_redirect=True, pay_delay=None):
     log('Hit finished!')
     if request.live:
-        status = db.hits(hitid = request.vars.hitId).status
+        hit = db.hits(hitid = request.vars.hitId)
+        status = hit.status
+        reward = hit.study.hit_params and fromjson(hit.study.hit_params).get('reward', None)
         soft_assert(status == 'getting done' or status == 'open',
                     'Finishing a hit %s that was marked %s instead of getting done!' %
                     (request.vars.hitId, status))
-        soft_assert(bonus_amount or is_price(request.price),
-                    'Finishing hit %s with no bonus amount %s or price %s' % 
-                    (request.vars.hitId, bonus_amount, request.price))
+        soft_assert(reward or bonus_amount or is_price(request.price),
+                    'Finishing hit %s with no reward (%s) bonus amount (%s) or price (%s)' %
+                    (request.vars.hitId, reward, bonus_amount, request.price))
 
         soft_assert(request.assid and request.workerid and request.hitid,
                     'empty octopus %s %s %s' %
