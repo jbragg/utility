@@ -176,14 +176,11 @@ server you run host real turk jobs from).
 Your host needs a public IP, DNS needs to be set up for it, including
 MX records.
 
- $ sudo apt-get install exim4-base exim4-daemon-light
- $ sudo dpkg-reconfigure exim4-config
+ $ sudo apt-get install postfix
 
 Choose options:
  - internet site, send & receive email
  - and give it the right hostname
-
-Now /usr/sbin/sendmail should work, and it should be able to send mail.
 
 ======================================
   Debugging, etc.

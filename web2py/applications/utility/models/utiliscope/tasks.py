@@ -32,19 +32,18 @@ def log_scheduler_errors(f):
 def send_email(to, subject, message):
     debug_t('Sending email now from within the scheduler!')
     if True:   # Use sendmail
-        SENDMAIL = "/usr/sbin/sendmail" # sendmail location
-        import os
-        p = os.popen("%s -t" % SENDMAIL, "w")
-        p.write("To: " + to + "\n")
-        p.write("Subject: " + subject + "\n")
-        p.write("\n") # blank line separating headers from body
-        p.write(message)
-        p.write("\n")
-        status = p.close()
-        if status != 0:
-            #print "Sendmail exit status", sts
-            pass
-
+        import smtplib
+        from email.mime.text import MIMEText
+        msg = MIMEText(message)
+        me = 'utility@' + external_server_url
+        # me == the sender's email address
+        # you == the recipient's email address
+        msg['Subject'] = subject
+        msg['From'] = me
+        msg['To'] = to
+        s = smtplib.SMTP('localhost')
+        s.sendmail(me, [to], msg.as_string())
+        s.quit()
     else:   # Use gmail
         from gluon.tools import Mail
         mail = Mail()
@@ -264,6 +263,7 @@ def launch_study(num_hits, task, name, description, hit_params=None):
     for i in range(num_hits):
         schedule_hit(datetime.now(), study.id, task, {})
     db.commit()
+    return study.id
 def launch_test_study(task, num_hits=1, nonce=None):
     study_name = 'teststudy %s' % task
     if nonce: study_name += ' %s' % nonce
