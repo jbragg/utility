@@ -82,6 +82,24 @@ def calc_real_study_price(study):
               for f in finishes)
     return sum(prices)
 
+def calc_real_study_wage(study, wage=10):
+    """Return fair wage based on median HIT time."""
+    import numpy as np
+    times = db(
+        (db.actions.study == study)
+        & (db.actions.action == 'finished')
+        & (db.actions.hitid == db.assignments.hitid)
+        & (db.actions.workerid == db.assignments.workerid)
+        & (db.actions.assid == db.assignments.assid)
+    ).select(
+        db.assignments.accept_time,
+        db.actions.time,
+        distinct=db.assignments.assid,
+    )
+    diffs = [(row.actions.time - row.assignments.accept_time).total_seconds() for row in times if row.actions.time and row.assignments.accept_time]
+    median_secs = np.median(diffs)
+    return median_secs / 3600 * wage
+
 def balance():
     balance = float(turk.get(turk.balance(), 'Amount'))
     to_pay = sum((float(a.amount) for a in db().select(db.bonus_queue.amount)))

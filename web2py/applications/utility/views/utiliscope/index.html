@@ -19,6 +19,7 @@
   <th style="border-width: 0 1px 1px 0">hits</th>
   <th style="border-width: 0 1px 1px 0">1¢ rate</th>
   <th style="border-width: 0 0 1px 0">money metric</th>
+  <th style="border-width: 0 0 1px 0">median fair reward ($10/hour wage)</th>
 </tr>
 {{
 q = db.studies.publish==published if published != None else db.studies.id>0
@@ -30,6 +31,7 @@ for study in db(q).select(db.studies.ALL, orderby=db.studies.id): }}
   </td>
   <td style="text-align: right; border-width: 0 1px 0 0">{{= cent_workrate(study) }}</td>
   <td>{{= study_result(study, 'money_metric') }}</td>
+  <td>{{='{:0.3f}'.format(calc_real_study_wage(study))}}</td>
 </tr>
 {{ pass }}
 <tr>
