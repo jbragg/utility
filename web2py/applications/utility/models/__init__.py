@@ -138,6 +138,7 @@ db.define_table('actions',
                 db.Field('assid', 'text'),
                 db.Field('time', 'datetime', default=now),
                 db.Field('ip', 'text'),
+                db.Field('useragent', 'text'),
                 db.Field('condition', db.conditions),
                 db.Field('phase', 'integer'),
                 db.Field('other', 'text'),
@@ -337,6 +338,7 @@ def record_action(action, other=None):
                       workerid   = request.workerid,
                       assid      = request.assid,
                       ip         = request.client,
+                      useragent  = request.env.http_user_agent,
                       condition  = get_condition(request.condition),
                       phase      = request.phase,
                       other      = other)
@@ -512,11 +514,11 @@ def update_ass(assid, hitid=None, workerid=None, status=None, paid=None, accept_
         dirty = False
     if jsoncache:
         x = fromjson(jsoncache)
-        assid = x['AssignmentId']
-        hitid = x['HITId']
-        workerid = x['WorkerId']
-        status = x['AssignmentStatus']
-        accept_time = x['AcceptTime']
+        assid = x.get('AssignmentId')
+        hitid = x.get('HITId')
+        workerid = x.get('WorkerId')
+        status = x.get('AssignmentStatus')
+        accept_time = x.get('AcceptTime')
         dirty = False
 
     ass = db.assignments(assid=assid)

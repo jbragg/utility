@@ -126,7 +126,7 @@ def process_bonus_queue():
                 
                 # This will automatically look up a hitid and assid if
                 # none is specified
-                pay_worker(row.worker, float(row.amount), row.reason,
+                pay_worker(row.worker, float(row.amount or 0), row.reason,
                                     row.assid, row.hitid)
 
                 debug_t('Success!  Deleting row.')
