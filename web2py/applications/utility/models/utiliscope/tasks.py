@@ -306,19 +306,22 @@ def launch_hit(hit):
             hit_serve_url(hit.task), iframe_height)
 
         # Launch the hit
-        result = turk.create_hit(params.question,
-                                 params.title,
-                                 params.description,
-                                 params.keywords,
-                                 params.ass_duration,
-                                 params.lifetime,
-                                 params.assignments,
-                                 params.reward,
-                                 params.tag,
-                                 params.block_india,
-                                 params.block_usa,
-                                 params.hits_approved,
-                                 params.percent_hits_approved)
+        result = turk.create_hit(
+            params.question,
+            params.title,
+            params.description,
+            params.keywords,
+            params.ass_duration,
+            params.lifetime,
+            params.assignments,
+            params.reward,
+            params.tag,
+            params.block_india,
+            params.block_usa,
+            params.hits_approved,
+            params.percent_hits_approved,
+            unique_request_token=str(hit.id),
+        )
 
         hitid = result['HITId']
         if not hitid: raise TurkAPIError('LOST A HIT! This shouldn\'t happen! check this out.')

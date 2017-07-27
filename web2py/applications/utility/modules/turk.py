@@ -7,13 +7,13 @@ import hashlib
 import base64
 import urllib
 import xml.dom.minidom
-import csv
 from datetime import datetime, timedelta
 import traceback
 import types
 from dal import DAL
 from gluon import serializers
 from botocore.exceptions import ClientError
+from botocore.vendored.requests.packages.urllib3.exceptions import RequestError
 # import autoreload
 # autoreload.run()
 
@@ -352,7 +352,8 @@ def create_hit(
         block_india=False,
         block_usa=False,
         hits_approved=None,
-        percent_hits_approved=None):
+        percent_hits_approved=None,
+        unique_request_token=None):
     params = {'Title' : title,
               'Question' : question,
               'MaxAssignments' : assignments,
@@ -364,6 +365,8 @@ def create_hit(
               }
     if tag is not None:
         params['RequesterAnnotation'] = tag
+    if unique_request_token is not None:
+        params['UniqueRequestToken'] = unique_request_token
 
     qualifications = []
     if block_india or block_usa:
@@ -393,7 +396,15 @@ def create_hit(
     if len(qualifications) > 0:
         params['QualificationRequirements'] = qualifications
 
-    result = BOTO_CLIENT.create_hit(**params)
+    try:
+        result = BOTO_CLIENT.create_hit(**params)
+    except ClientError as e:
+        if 'already exists' in str(e).lower():
+            id = str(e).split('"')[1]
+            result = {'HIT': {'HITId': id}}
+        else:
+            raise e
+
     update_hit(hitid=result['HIT']['HITId'])
     return result['HIT']
 
