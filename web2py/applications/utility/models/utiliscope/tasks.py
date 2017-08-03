@@ -111,7 +111,7 @@ def process_bonus_queue():
       - It will automatically find an existing assid/hitid to bonus if none is specified
     '''
     try:
-        for row in db().select(db.bonus_queue.ALL):
+        for row in db(~(db.bonus_queue.unpayable == True)).select(db.bonus_queue.ALL):
             # Skip workers that we aren't ready for yet
             if row.delay and row.delay > 0:
                 action = db.actions(assid=row.assid, action='finished')

@@ -219,6 +219,7 @@ db.define_table('bonus_queue',
                 db.Field('reason', 'text'),
                 db.Field('delay', 'integer', default=0),
                 db.Field('study', db.studies),
+                db.Field('unpayable', 'boolean'),
                 migrate=migratep, fake_migrate=fake_migratep)
                 
 
